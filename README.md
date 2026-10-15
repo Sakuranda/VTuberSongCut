@@ -47,9 +47,9 @@
 
 | 系统 | 安装包 |
 | --- | --- |
-| macOS 15+ · Apple Silicon | `.dmg` |
-| Windows · x64 | `.exe` 安装程序 |
-| Linux · x64 | `.AppImage` / `.deb` |
+| macOS 15+ · Apple Silicon | [下载 DMG](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber%20SongCut_0.1.0_aarch64.dmg) |
+| Windows · x64 | [下载 EXE](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber%20SongCut_0.1.0_x64-setup.exe) |
+| Linux · x64 | [下载 AppImage](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber%20SongCut_0.1.0_amd64.AppImage) / [下载 DEB](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber%20SongCut_0.1.0_amd64.deb) |
 
 安装后打开拾歌，导入录播，在左侧选择主播模型即可开始。第一次使用时，可到**模型训练**工作区训练自己的模型，或导入已有兼容模型。安装包不附带主播模型权重；详见[模型使用说明](docs/MODELS.md)。
 
