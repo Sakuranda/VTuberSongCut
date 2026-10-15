@@ -12,7 +12,7 @@ $installerPath = (Resolve-Path -LiteralPath $Installer).Path
 $reportPath = [System.IO.Path]::GetFullPath($Report)
 $destination = Join-Path $env:RUNNER_TEMP ("SongCut installed smoke " + [guid]::NewGuid().ToString("N"))
 $smokeScript = Join-Path $repository "scripts/smoke_desktop_backend.py"
-$python = (Get-Command python -CommandType Application).Source
+$python = (Get-Command python -CommandType Application | Select-Object -First 1).Source
 
 # NSIS requires /D to be last and unquoted, even if the destination has spaces.
 # Start-Process joins ArgumentList without adding quotation marks around /D.

@@ -181,20 +181,77 @@ jobs:
           else
             python scripts/smoke_desktop_backend.py apps/desktop/src-tauri/binaries/songcut-backend/songcut-backend
           fi
+      - name: Restore Rust compilation cache
+        id: rust-cache
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target/.rustc_info.json
+            apps/desktop/src-tauri/target/release/.fingerprint
+            apps/desktop/src-tauri/target/release/build
+            apps/desktop/src-tauri/target/release/deps
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/.fingerprint
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/build
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/deps
+          key: desktop-rust-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock', 'apps/desktop/src-tauri/Cargo.toml') }}
+          restore-keys: desktop-rust-${{ runner.os }}-${{ matrix.target }}-
       - name: Build platform installer
+        id: installer
         working-directory: apps/desktop
         shell: bash
         env:
           NO_STRIP: 'true'
         run: |
           npm ci
+          installer_config=()
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            python -c 'import json, os; from pathlib import Path; Path(os.environ["RUNNER_TEMP"], "songcut-nsis-fast.json").write_text(json.dumps({"bundle": {"windows": {"nsis": {"compression": "zlib"}}}}))'
+            installer_config=(--config "$RUNNER_TEMP/songcut-nsis-fast.json")
+          fi
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             # linuxdeploy scans nested PyInstaller ELF files outside their normal
             # bootloader context. Expose the bundled private library directories.
             bundled_libraries=$(python -c 'from pathlib import Path; print(":".join(sorted({str(p.parent.resolve()) for p in Path("src-tauri/binaries/songcut-backend/_internal").rglob("*.so*") if p.is_file()})))')
             export LD_LIBRARY_PATH="$bundled_libraries${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           fi
-          npm run build -- --verbose --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
+          npm run build -- "${installer_config[@]}" --verbose --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
+      - name: Save Rust compilation before installation checks
+        if: always() && steps.installer.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target/.rustc_info.json
+            apps/desktop/src-tauri/target/release/.fingerprint
+            apps/desktop/src-tauri/target/release/build
+            apps/desktop/src-tauri/target/release/deps
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/.fingerprint
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/build
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/deps
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+      - name: Export matching patched media sources, recipes and binary manifest
+        id: media-sources
+        if: always() && steps.installer.outcome == 'success'
+        run: python scripts/export_media_sources.py --label ${{ matrix.label }} --prune-build-outputs
+      - name: Preserve installers and matching sources before installation checks
+        if: always() && steps.media-sources.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-unverified-${{ matrix.label }}
+          path: |
+            release-assets/MediaSources-${{ matrix.label }}.tar.gz
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
       - name: Verify installed macOS DMG contents
         if: runner.os == 'macOS'
         run: python scripts/smoke_macos_installer.py apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle --report release-assets/macOS-installer-smoke.json
@@ -208,8 +265,6 @@ jobs:
       - name: Verify installed Linux AppImage and deb contents
         if: runner.os == 'Linux'
         run: python scripts/smoke_linux_installers.py apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle --report release-assets/Linux-installer-smoke.json
-      - name: Export matching patched media sources, recipes and binary manifest
-        run: python scripts/export_media_sources.py --label ${{ matrix.label }} --prune-build-outputs
       - name: Collect installers and checksums
         shell: python
         env:
