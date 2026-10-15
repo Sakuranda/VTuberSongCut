@@ -98,6 +98,7 @@ jobs:
             work/media/installed
             work/media/vcpkg/buildtrees
             work/media/build-history
+            work/media/source-archives
             work/media/build.log
           key: media-built-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('packaging/**', 'scripts/build_release_media.py', 'scripts/export_media_sources.py') }}
       - name: Linux build dependencies

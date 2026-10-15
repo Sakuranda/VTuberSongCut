@@ -82,3 +82,60 @@ def test_source_export_rejects_mismatched_frozen_configuration(exporter, media_s
     monkeypatch.setattr(exporter.subprocess, "check_output", lambda *args, **kwargs: "unrelated binary version\n")
     with pytest.raises(ValueError, match="differs from the controlled build"):
         exporter.export(state, "fixture", backend, output, check_checkout=False)
+
+
+def test_original_sources_survive_independent_download_cache_eviction(exporter, media_state):
+    state, backend, output = media_state
+    exporter.export(state, "fixture", backend, output, check_checkout=False)
+    (state / "downloads/ffmpeg-source.tar.gz").unlink()
+    assert (state / "source-archives/ffmpeg-source.tar.gz").is_file()
+    companion = exporter.export(state, "fixture", backend, output, check_checkout=False)
+    with tarfile.open(companion) as archive:
+        assert any(name.endswith("original-source-archives/ffmpeg-source.tar.gz") for name in archive.getnames())
+
+
+def test_fresh_bootstrap_creates_download_directory_before_running_tools(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    builder = importlib.import_module("build_release_media")
+    monkeypatch.setattr(builder, "ROOT", tmp_path)
+    monkeypatch.setattr(builder.platform, "platform", lambda: "fixture platform")
+    monkeypatch.setattr(builder.sys, "argv", ["build_release_media.py", "--triplet", "test-triplet"])
+    monkeypatch.setenv("GITHUB_ENV", str(tmp_path / "github-env"))
+    state = tmp_path / "work/media"
+    (state / "vcpkg").mkdir(parents=True)
+    packaging = tmp_path / "packaging"
+    (packaging / "triplets").mkdir(parents=True)
+    (packaging / "triplets/test-triplet.cmake").write_text("release triplet")
+    (packaging / "vcpkg.json").write_text(json.dumps({"builtin-baseline": builder.PIN}))
+
+    def bootstrap(command, **kwargs):
+        assert Path(kwargs["env"]["VCPKG_DOWNLOADS"]).is_dir(), "bootstrap must receive an existing downloads directory"
+
+    class Install:
+        stdout = ["source build completed\n"]
+
+        def __init__(self, command, **kwargs):
+            assert Path(kwargs["env"]["VCPKG_DOWNLOADS"]).is_dir()
+            tools = state / "installed/test-triplet/tools/ffmpeg"
+            tools.mkdir(parents=True)
+            for name in ("ffmpeg", "ffprobe"):
+                (tools / (name + (".exe" if builder.os.name == "nt" else ""))).write_bytes(b"native test binary")
+
+        def wait(self):
+            return 0
+
+    def inspect(command, **kwargs):
+        if command[0] == "git":
+            return builder.PIN + "\n"
+        if "-filters" in command:
+            return " T.. ass V->V\n"
+        if "-encoders" in command:
+            return "libx264 libx265 libmp3lame\n"
+        return "controlled version --enable-gpl\n"
+
+    monkeypatch.setattr(builder.subprocess, "run", bootstrap)
+    monkeypatch.setattr(builder.subprocess, "Popen", Install)
+    monkeypatch.setattr(builder.subprocess, "check_output", inspect)
+    builder.main()
+    assert (state / "media-build.json").is_file()
+    assert "SONGCUT_BUILD_FFMPEG=" in (tmp_path / "github-env").read_text()

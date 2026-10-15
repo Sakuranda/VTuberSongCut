@@ -49,7 +49,7 @@ Visit **[Releases](https://github.com/Sakuranda/VTuberSongCut/releases)** and do
 | --- | --- |
 | macOS 15+ · Apple Silicon | `.dmg` |
 | Windows · x64 | `.exe` installer |
-| Linux · x64 | `.AppImage` |
+| Linux · x64 | `.AppImage` / `.deb` |
 
 Install the app, import a recording, and select the performer's model. On first use, open **Model Training** to train your own detector or import a compatible model. Performer weights are not included in the installers; see the [model guide](docs/MODELS.md).
 
@@ -57,7 +57,7 @@ Desktop packages are built by GitHub Actions. Check the corresponding release no
 
 ### Self-hosted server
 
-With Docker and Docker Compose installed, run:
+With Docker, Docker Compose, and Git installed, run:
 
 ```sh
 git clone https://github.com/Sakuranda/VTuberSongCut.git && cd VTuberSongCut

@@ -49,7 +49,7 @@
 | --- | --- |
 | macOS 15+ · Apple Silicon | `.dmg` |
 | Windows · x64 | `.exe` 安装程序 |
-| Linux · x64 | `.AppImage` |
+| Linux · x64 | `.AppImage` / `.deb` |
 
 安装后打开拾歌，导入录播，在左侧选择主播模型即可开始。第一次使用时，可到**模型训练**工作区训练自己的模型，或导入已有兼容模型。安装包不附带主播模型权重；详见[模型使用说明](docs/MODELS.md)。
 
@@ -57,7 +57,7 @@
 
 ### 自托管服务器
 
-服务器安装 Docker 与 Docker Compose 后，运行：
+服务器准备好 Docker、Docker Compose 和 Git 后，运行：
 
 ```sh
 git clone https://github.com/Sakuranda/VTuberSongCut.git && cd VTuberSongCut

@@ -51,6 +51,8 @@ def collect_source_archives(downloads: Path, logs: list[Path]) -> list[Path]:
     for name in sorted(names):
         archive = downloads / name
         if not archive.is_file():
+            archive = downloads.parent / "source-archives" / name
+        if not archive.is_file():
             raise ValueError(f"Recorded source download is missing: {name}")
         result.append(archive)
     return result
@@ -80,6 +82,14 @@ def export(state: Path, label: str, backend: Path, output: Path, *, check_checko
     archives = collect_source_archives(state / "downloads", logs)
     if not archives:
         raise ValueError("No original source archive extraction records were preserved")
+    # Keep original sources with the installed/source cache as well as in the
+    # downloads cache: either GitHub cache entry may expire independently.
+    source_cache = state / "source-archives"
+    source_cache.mkdir(exist_ok=True)
+    for archive in archives:
+        cached = source_cache / archive.name
+        if archive.resolve() != cached.resolve():
+            shutil.copy2(archive, cached)
     output.mkdir(parents=True, exist_ok=True)
     staging = state / "source-export" / f"MediaSources-{label}"
     if staging.exists():
