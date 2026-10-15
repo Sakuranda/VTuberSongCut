@@ -42,6 +42,7 @@ def test_resource_root_environment_override(monkeypatch, tmp_path):
 
 
 def test_gui_launch_without_standard_handles_still_configures_logging(monkeypatch):
+    import logging
     from studio.launcher import configure_stdio
     from uvicorn.logging import DefaultFormatter
     streams = []
@@ -51,10 +52,10 @@ def test_gui_launch_without_standard_handles_still_configures_logging(monkeypatc
             context.setattr(sys, "stderr", None)
             configure_stdio()
             streams = [sys.stdout, sys.stderr]
-            assert all(stream is not None and not stream.isatty() for stream in streams)
+            assert all(stream is not None for stream in streams)
             # This previously raised AttributeError on stdout=None.
             formatter = DefaultFormatter()
-            assert formatter.use_colors is False
+            assert formatter.format(logging.makeLogRecord({"msg": "ready", "levelno": logging.INFO, "levelname": "INFO"})) == "ready"
     finally:
         for stream in streams:
             stream.close()

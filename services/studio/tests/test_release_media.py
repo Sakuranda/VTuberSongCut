@@ -201,6 +201,7 @@ def test_verified_cache_can_be_reused_after_later_app_step_fails(monkeypatch):
 
 
 def test_exact_verified_media_cache_avoids_compiler_and_still_requires_sources(exporter, media_state, monkeypatch):
+    import os
     import shutil
     builder = importlib.import_module("build_release_media")
     state, _, _ = media_state
@@ -209,6 +210,10 @@ def test_exact_verified_media_cache_avoids_compiler_and_still_requires_sources(e
     destination.parent.mkdir()
     shutil.move(state, destination)
     state = destination
+    if os.name == "nt":
+        tools = state / "installed/test-triplet/tools/ffmpeg"
+        for name in ("ffmpeg", "ffprobe"):
+            shutil.copy2(tools / name, tools / f"{name}.exe")
     packaging = root / "packaging"
     (packaging / "triplets").mkdir(parents=True)
     (packaging / "triplets/test-triplet.cmake").write_text("release triplet")
