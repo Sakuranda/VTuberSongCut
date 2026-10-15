@@ -405,7 +405,7 @@ class TrainingService:
                     inspect = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                                f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine"]
                 else:
-                    inspect = ["ps", "-p", str(pid), "-o", "command="]
+                    inspect = ["ps", "-ww", "-p", str(pid), "-o", "command="]
                 command = subprocess.run(inspect, capture_output=True, text=True, timeout=3).stdout
                 if "training_worker.py" in command and str(job["id"]) in command:
                     self._terminate_tree(pid)

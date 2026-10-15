@@ -110,7 +110,7 @@ def test_start_uses_immutable_snapshot_and_cancelled_queue_never_trains(training
     with pytest.raises(ConflictError):
         training.start(dataset["id"], {"steps": 2})
     training.update_sample(dataset["id"], dataset["samples"][0]["id"], {"regions": [], "reviewed": False}, dataset["revision"])
-    snapshot = json.loads((Path(job["directory"]) / "snapshot.json").read_text())
+    snapshot = json.loads((Path(job["directory"]) / "snapshot.json").read_text(encoding="utf-8"))
     assert snapshot["dataset"] == dataset
     assert snapshot["settings"]["steps"] == 2
     assert snapshot["scope"] == "target-vs-rest"
@@ -162,7 +162,7 @@ def test_cancel_kills_worker_and_child_process_group(training, tmp_path, monkeyp
     marker = Path(job["directory"]) / "child.pid"
     while not marker.exists() and time.monotonic() < deadline:
         time.sleep(.02)
-    child_pid = int(marker.read_text())
+    child_pid = int(marker.read_text(encoding="utf-8"))
     assert training.cancel(job["id"])["status"] == "cancelled"
     process.wait(timeout=3)
     # The child must be gone (or already a dead zombie awaiting its reaper).
@@ -207,12 +207,12 @@ def test_real_original_cli_training_outputs_finite_checkpoint(tmp_path):
     snapshot_path = tmp_path / "snapshot.json"
     snapshot_path.write_text(json.dumps(snapshot))
     main(snapshot_path)
-    result = json.loads((tmp_path / "result.json").read_text())
+    result = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
     assert result["verified_finite"]
     checkpoint = torch.load(result["checkpoint_path"], map_location="cpu", weights_only=True)
     assert checkpoint["step"] in (1, 2)
     assert all(torch.isfinite(tensor).all() for tensor in checkpoint["model"].values())
-    assert len(json.loads((tmp_path / "runs/model/history.json").read_text())) == 2
+    assert len(json.loads((tmp_path / "runs/model/history.json").read_text(encoding="utf-8"))) == 2
 
 
 def test_observation_failure_terminates_real_worker_before_publishing_failure(training, tmp_path, monkeypatch):
@@ -275,7 +275,7 @@ def test_restart_terminates_recorded_worker_and_children_before_unlocking(traini
         marker = directory / "child.pid"
         while not marker.exists() and time.monotonic() < deadline:
             time.sleep(.02)
-        child_pid = int(marker.read_text())
+        child_pid = int(marker.read_text(encoding="utf-8"))
         training._save_job(dict(id=job_id, dataset_id="dataset", status="running", pid=process.pid))
         reopened = TrainingService(training.settings, training.store)
         assert reopened.get_job(job_id)["status"] == "interrupted"
