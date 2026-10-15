@@ -24,7 +24,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: desktop-${{ github.ref }}-${{ github.sha }}
+  group: desktop-${{ github.ref }}-${{ github.sha }}-${{ inputs.build_os || 'all' }}
   cancel-in-progress: false
 jobs:
   validate:
