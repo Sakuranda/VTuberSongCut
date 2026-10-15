@@ -36,6 +36,77 @@ export interface Clip {
   subtitle: Subtitle;
   export_settings: ExportSettings;
 }
+export type DetectorDevice = "auto" | "cpu" | "mps" | "cuda";
+export interface ModelInfo {
+  id: string;
+  name: string;
+  filename: string;
+  sha256: string;
+  size_bytes: number;
+  architecture: string;
+  classes: number;
+  origin: "preconfigured" | "imported" | "trained";
+  available: boolean;
+  unavailable_reason: string | null;
+}
+export interface ModelCatalog {
+  models: ModelInfo[];
+  devices: { id: DetectorDevice; label: string; available: boolean }[];
+  engine_ready: boolean;
+  engine_error: string | null;
+}
+export interface TrainingRegion {
+  start_ms: number;
+  end_ms: number;
+  label: "target" | "other";
+}
+export interface TrainingSample {
+  id: string;
+  name: string;
+  duration_ms: number;
+  sha256: string;
+  split: "train" | "validation";
+  reviewed: boolean;
+  regions: TrainingRegion[];
+}
+export interface TrainingDataset {
+  id: string;
+  name: string;
+  target_name: string;
+  revision: number;
+  samples: TrainingSample[];
+}
+export interface TrainingSettings {
+  device: DetectorDevice;
+  steps: number;
+  batch_size: number;
+  window_s: number;
+  val_every: number;
+  lr: number;
+  seed: number;
+  warmup: number;
+}
+export interface TrainingJob {
+  id: string;
+  dataset_id: string;
+  dataset_revision: number;
+  status:
+    | "queued"
+    | "running"
+    | "succeeded"
+    | "failed"
+    | "cancelled"
+    | "interrupted";
+  stage: string;
+  message: string;
+  progress: number;
+  step: number;
+  total_steps: number;
+  history: { step: number; [key: string]: unknown }[];
+  log_tail: string;
+  model: ModelInfo | null;
+  error: string | null;
+}
 export interface Project {
   id: string;
   revision: number;
@@ -47,6 +118,8 @@ export interface Project {
   has_video: boolean;
   preview_file: string | null;
   clips: Clip[];
+  detector_model_id: string | null;
+  detector_device: DetectorDevice;
 }
 export interface Job {
   id: string;
@@ -55,6 +128,9 @@ export interface Job {
   status: "queued" | "running" | "succeeded" | "failed" | "interrupted";
   message: string;
   artifacts: string[];
+  model_name?: string;
+  model_id?: string;
+  device?: string;
 }
 export interface Capabilities {
   detector_ready: boolean;
@@ -116,7 +192,70 @@ const post = <T>(path: string, body?: unknown) =>
           body: JSON.stringify(body),
         }),
   });
+export function projectEdits(project: Project) {
+  return {
+    clips: project.clips,
+    detector_model_id: project.detector_model_id ?? null,
+    detector_device: project.detector_device ?? "auto",
+  };
+}
 export const api = {
+  trainingDatasets: () => request<TrainingDataset[]>("/training/datasets"),
+  trainingDataset: (id: string) =>
+    request<TrainingDataset>(`/training/datasets/${id}`),
+  createTrainingDataset: (name: string, target_name: string) =>
+    post<TrainingDataset>("/training/datasets", { name, target_name }),
+  uploadTrainingSample: (dataset: TrainingDataset, file: File) => {
+    const body = new FormData();
+    body.append("file", file);
+    body.append("revision", String(dataset.revision));
+    return request<TrainingDataset>(
+      `/training/datasets/${dataset.id}/samples`,
+      { method: "POST", body },
+    );
+  },
+  saveTrainingSample: (dataset: TrainingDataset, sample: TrainingSample) =>
+    request<TrainingDataset>(
+      `/training/datasets/${dataset.id}/samples/${sample.id}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          revision: dataset.revision,
+          split: sample.split,
+          reviewed: sample.reviewed,
+          regions: sample.regions,
+        }),
+      },
+    ),
+  deleteTrainingSample: (dataset: TrainingDataset, sample: TrainingSample) =>
+    request<TrainingDataset>(
+      `/training/datasets/${dataset.id}/samples/${sample.id}`,
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: dataset.revision }),
+      },
+    ),
+  trainingMedia: (dataset: string, sample: string) =>
+    `/api/training/datasets/${dataset}/samples/${sample}/media`,
+  trainingPreview: (dataset: string, sample: string) =>
+    post<Job>(`/training/datasets/${dataset}/samples/${sample}/preview`),
+  startTraining: (dataset: TrainingDataset, settings: TrainingSettings) =>
+    post<TrainingJob>(`/training/datasets/${dataset.id}/train`, {
+      revision: dataset.revision,
+      settings,
+    }),
+  trainingJobs: () => request<TrainingJob[]>("/training/jobs"),
+  cancelTraining: (id: string) =>
+    post<TrainingJob>(`/training/jobs/${id}/cancel`),
+  models: () => request<ModelCatalog>("/models"),
+  uploadModel: (file: File, name?: string) => {
+    const body = new FormData();
+    body.append("file", file);
+    if (name?.trim()) body.append("name", name.trim());
+    return request<ModelInfo>("/models/upload", { method: "POST", body });
+  },
   projects: () => request<Project[]>("/projects"),
   project: (id: string) => request<Project>(`/projects/${id}`),
   capabilities: () => request<Capabilities>("/capabilities"),
@@ -132,7 +271,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         revision: project.revision,
-        clips: project.clips,
+        ...projectEdits(project),
       }),
     }),
   detect: (id: string) => post<Job>(`/projects/${id}/detect`),

@@ -42,12 +42,18 @@ with TestClient(create_app(settings)) as client:
     ident = project["id"]
     wait(post(f"/api/projects/{ident}/preview"))
     assert client.get(f"/api/projects/{ident}/media", headers={"Range": "bytes=0-99"}).status_code == 206
+    current = client.get(f"/api/projects/{ident}").json()
+    models = client.get("/api/models").json()["models"]
+    assert models, "prepare a compatible model first"
+    selected_model = models[0]["id"]
+    selected = client.put(f"/api/projects/{ident}", headers=headers, json={"revision": current["revision"], "clips": current["clips"], "detector_model_id": selected_model, "detector_device": "auto"})
+    selected.raise_for_status()
     wait(post(f"/api/projects/{ident}/detect"))
     project = client.get(f"/api/projects/{ident}").json()
     assert project["clips"] == [], "synthetic sine wave should not be a target singing event"
     clip = Clip(start_ms=1000, end_ms=6000, title="合成字幕验收", subtitle=SubtitleStyle(enabled=True, layout="double", font_size=72),
                 export_settings=ExportSettings(resolution="720p", fps=30, rate_control="bitrate", video_bitrate_kbps=1500))
-    response = client.put(f"/api/projects/{ident}", headers=headers, json={"revision": project["revision"], "clips": [clip.model_dump()]})
+    response = client.put(f"/api/projects/{ident}", headers=headers, json={"revision": project["revision"], "clips": [clip.model_dump()], "detector_model_id": selected_model, "detector_device": "auto"})
     response.raise_for_status()
     post(f"/api/projects/{ident}/clips/{clip.id}/lyrics", json={"text": "[00:00]拾歌 字幕验收\n[00:02.50]这里是合成测试素材", "offset_ms": 0})
     job = wait(post(f"/api/projects/{ident}/clips/{clip.id}/export"))

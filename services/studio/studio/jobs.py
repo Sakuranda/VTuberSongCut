@@ -13,12 +13,12 @@ class JobRunner:
         self.lock = Lock()
         store.recover()
 
-    def submit(self, project_id: str, kind: str, operation, input_revision: int | None = None) -> Job:
+    def submit(self, project_id: str, kind: str, operation, input_revision: int | None = None, model_info: dict | None = None) -> Job:
         with self.lock:
             if project_id in self.active:
                 raise ConflictError("这个项目已有任务在处理，请稍后再试")
             self.active.add(project_id)
-        job = Job(project_id=project_id, kind=kind, input_revision=input_revision)
+        job = Job(project_id=project_id, kind=kind, input_revision=input_revision, **(model_info or {}))
         self.store.save_job(job)
 
         def run():

@@ -15,6 +15,8 @@ export function normalizeProject(project: Project): Project {
   return {
     ...project,
     source_fps: project.source_fps ?? null,
+    detector_model_id: project.detector_model_id ?? null,
+    detector_device: project.detector_device ?? "auto",
     clips: project.clips.map((clip) => ({
       ...clip,
       export_settings: { ...DEFAULT_EXPORT_SETTINGS, ...clip.export_settings },

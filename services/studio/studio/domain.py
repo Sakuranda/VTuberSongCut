@@ -105,6 +105,8 @@ class Project(Record):
     source_fps: float | None = Field(default=None, gt=0)
     preview_file: str | None = None
     clips: list[Clip] = Field(default_factory=list)
+    detector_model_id: str | None = None
+    detector_device: Literal["auto", "cpu", "mps", "cuda"] = "auto"
 
     @model_validator(mode="after")
     def validate_clips(self):
@@ -120,6 +122,10 @@ class Job(Record):
     project_id: str
     kind: str
     input_revision: int | None = None
+    model_id: str | None = None
+    model_name: str | None = None
+    model_sha256: str | None = None
+    device: str | None = None
     status: Literal["queued", "running", "succeeded", "failed", "interrupted"] = "queued"
     message: str = "等待处理"
     artifacts: list[str] = Field(default_factory=list)

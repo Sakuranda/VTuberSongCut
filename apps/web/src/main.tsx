@@ -1,7 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { api, ApiError } from "./api";
-import type { Capabilities, Clip, Job, Project } from "./api";
+import { api, ApiError, projectEdits } from "./api";
+import type {
+  Capabilities,
+  Clip,
+  Job,
+  ModelCatalog,
+  ModelInfo,
+  Project,
+} from "./api";
 import {
   DEFAULT_EXPORT_SETTINGS,
   editingFps,
@@ -13,7 +20,10 @@ import {
 import { Timeline } from "./Timeline";
 import { TimecodeInput } from "./TimecodeInput";
 import { ExportControls } from "./ExportControls";
+import { ModelSelector, ModelManager } from "./ModelControls";
+import { TrainingWorkspace } from "./TrainingWorkspace";
 import "./styles.css";
+import "./training.css";
 
 const length = (ms: number) =>
   `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
@@ -96,6 +106,9 @@ function Icon({
   );
 }
 function App() {
+  const [workspace, setWorkspace] = useState<"cut" | "training">("cut");
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
+  const [catalogError, setCatalogError] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project | null>(null);
   const [saved, setSaved] = useState("");
@@ -117,7 +130,8 @@ function App() {
   const invalidTime = Object.values(invalidTimes).some(Boolean);
   const media = useRef<HTMLVideoElement | null>(null);
   const upload = useRef<HTMLInputElement | null>(null);
-  const dirty = !!project && JSON.stringify(project.clips) !== saved;
+  const pendingModelId = useRef<string | null>(null);
+  const dirty = !!project && JSON.stringify(projectEdits(project)) !== saved;
   const live = useRef({ project, dirty, busy });
   live.current = { project, dirty, busy };
   const previousJobs = useRef<Job[]>([]);
@@ -127,6 +141,40 @@ function App() {
     (j) => j.status === "running" || j.status === "queued",
   );
   const blocked = !!busy || dirty || conflict || processing || invalidTime;
+  const detectorModel = catalog?.models.find(
+    (model) => model.id === project?.detector_model_id,
+  );
+  const detectorDevice = catalog?.devices.find(
+    (device) => device.id === project?.detector_device,
+  );
+  const detectorReady =
+    !!catalog?.engine_ready &&
+    !!detectorModel?.available &&
+    !!detectorDevice?.available;
+  async function refreshCatalog() {
+    try {
+      setCatalog(await api.models());
+      setCatalogError("");
+    } catch (e) {
+      setCatalogError(e instanceof Error ? e.message : "无法读取模型库");
+    }
+  }
+  async function useModel(model: ModelInfo) {
+    await refreshCatalog();
+    setWorkspace("cut");
+    pendingModelId.current = live.current.project ? null : model.id;
+    setProject((current) =>
+      current ? { ...current, detector_model_id: model.id } : current,
+    );
+    setNotice(
+      live.current.project
+        ? `已选择「${model.name}」，保存修改后可开始检测。`
+        : `已准备使用「${model.name}」。导入录播后会自动选中它，再保存即可检测。`,
+    );
+  }
+  useEffect(() => {
+    void refreshCatalog();
+  }, []);
   const fps = editingFps(project?.source_fps);
   const output = clip?.export_settings || DEFAULT_EXPORT_SETTINGS;
   const outputLabel =
@@ -136,7 +184,7 @@ function App() {
   function accept(raw: Project, preserveSelection = true) {
     const p = normalizeProject(raw);
     setProject(p);
-    setSaved(JSON.stringify(p.clips));
+    setSaved(JSON.stringify(projectEdits(p)));
     setSelected((s) =>
       preserveSelection && p.clips.some((c) => c.id === s)
         ? s
@@ -272,6 +320,7 @@ function App() {
     function shortcuts(event: globalThis.KeyboardEvent) {
       const target = event.target instanceof Element ? event.target : null;
       if (
+        workspace !== "cut" ||
         !project ||
         event.defaultPrevented ||
         event.ctrlKey ||
@@ -316,7 +365,7 @@ function App() {
     }
     window.addEventListener("keydown", shortcuts);
     return () => window.removeEventListener("keydown", shortcuts);
-  }, [project, clip, now, busy, invalidTime, fps, mediaError]);
+  }, [workspace, project, clip, now, busy, invalidTime, fps, mediaError]);
   async function save() {
     if (!project) return;
     if (invalidTime) {
@@ -352,9 +401,20 @@ function App() {
     setError("");
     try {
       accept(await api.upload(file), false);
+      const pending = pendingModelId.current;
+      if (pending) {
+        setProject((current) =>
+          current ? { ...current, detector_model_id: pending } : current,
+        );
+        pendingModelId.current = null;
+      }
       setMediaError(false);
       setNow(0);
-      setNotice("视频已导入，可以检测演唱片段或手动添加");
+      setNotice(
+        pending
+          ? "视频已导入，并选中刚才的模型。保存修改后可开始检测。"
+          : "视频已导入，选择模型后可检测演唱片段，也可手动添加。",
+      );
     } catch (e) {
       fail(e);
     } finally {
@@ -363,7 +423,13 @@ function App() {
     }
   }
   async function run(kind: "detect" | "preview" | "export") {
-    if (!project || blocked || (kind === "export" && !clip)) return;
+    if (
+      !project ||
+      blocked ||
+      (kind === "export" && !clip) ||
+      (kind === "detect" && !detectorReady)
+    )
+      return;
     setBusy(kind);
     setError("");
     try {
@@ -452,7 +518,7 @@ function App() {
             </h1>
             <p>把直播里的好歌，留在这一刻。</p>
           </div>
-          <div className="top-actions">
+          <div className="top-actions" hidden={workspace !== "cut"}>
             <span className="local-label">
               <span className="local-dot" /> 本地工作空间
             </span>
@@ -473,765 +539,861 @@ function App() {
             />
           </div>
         </header>
+        <nav className="workspace-navigation" aria-label="工作区">
+          <button
+            className={workspace === "cut" ? "active" : ""}
+            aria-current={workspace === "cut" ? "page" : undefined}
+            onClick={() => {
+              media.current?.pause();
+              setWorkspace("cut");
+            }}
+          >
+            录播切歌
+          </button>
+          <button
+            className={workspace === "training" ? "active" : ""}
+            aria-current={workspace === "training" ? "page" : undefined}
+            onClick={() => {
+              media.current?.pause();
+              setWorkspace("training");
+            }}
+          >
+            模型训练
+          </button>
+        </nav>
         <main>
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">
-                剪辑工作台 <span>/</span> WORKBENCH
+          <div hidden={workspace !== "cut"} aria-label="录播切歌工作区">
+            <div className="page-heading">
+              <div>
+                <div className="eyebrow">
+                  剪辑工作台 <span>/</span> WORKBENCH
+                </div>
+                <h2>{project ? project.name : "从一场直播，拾起一首歌。"}</h2>
               </div>
-              <h2>{project ? project.name : "从一场直播，拾起一首歌。"}</h2>
+              {project && (
+                <div className="save-group">
+                  <span className={dirty ? "unsaved" : "saved"}>
+                    {dirty ? "● 有未保存修改" : "✓ 修改已保存"}
+                  </span>
+                  <button
+                    className="button"
+                    disabled={!dirty || !!busy || conflict || invalidTime}
+                    onClick={() => void save()}
+                  >
+                    保存修改
+                  </button>
+                </div>
+              )}
             </div>
-            {project && (
-              <div className="save-group">
-                <span className={dirty ? "unsaved" : "saved"}>
-                  {dirty ? "● 有未保存修改" : "✓ 修改已保存"}
-                </span>
+            {error && (
+              <div className="banner error" role="alert">
+                <span>{error}</span>
+                {conflict && project && (
+                  <button onClick={() => void load(project.id)}>
+                    放弃本地修改并重新载入
+                  </button>
+                )}
                 <button
-                  className="button"
-                  disabled={!dirty || !!busy || conflict || invalidTime}
-                  onClick={() => void save()}
+                  className="dismiss"
+                  onClick={() => setError("")}
+                  aria-label="关闭错误提示"
                 >
-                  保存修改
+                  ×
                 </button>
               </div>
             )}
-          </div>
-          {error && (
-            <div className="banner error" role="alert">
-              <span>{error}</span>
-              {conflict && project && (
-                <button onClick={() => void load(project.id)}>
-                  放弃本地修改并重新载入
-                </button>
-              )}
-              <button
-                className="dismiss"
-                onClick={() => setError("")}
-                aria-label="关闭错误提示"
-              >
-                ×
-              </button>
-            </div>
-          )}
-          {notice && (
-            <div className="banner info" role="status">
-              {notice}
-              <button
-                className="dismiss"
-                onClick={() => setNotice("")}
-                aria-label="关闭提示"
-              >
-                ×
-              </button>
-            </div>
-          )}
-          {refreshPending && (
-            <div className="banner info">
-              后台任务已完成。请先保存修改，再重新载入项目以查看结果。
-              <button
-                disabled={dirty || !!busy}
-                onClick={() => project && void load(project.id)}
-              >
-                重新载入
-              </button>
-            </div>
-          )}
-          <div className="workbench">
-            <section className="panel library">
-              <div className="panel-heading">
-                <h3>
-                  <Icon name="folder" size={17} /> 直播素材
-                </h3>
-                <span className="count">{projects.length}</span>
-              </div>
-              <label className="project-select">
-                <span>当前项目</span>
-                <select
-                  value={project?.id || ""}
-                  disabled={!!busy}
-                  onChange={(e) => void load(e.target.value)}
-                >
-                  {!project && <option value="">选择项目</option>}
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {project && (
-                <div className="source-summary">
-                  <div className="source-symbol">
-                    <Icon name="play" size={15} />
-                  </div>
-                  <div>
-                    <strong title={project.source_name}>
-                      {project.source_name}
-                    </strong>
-                    <span>
-                      {length(project.duration_ms)} ·{" "}
-                      {project.has_video ? "视频素材" : "音频素材"}
-                    </span>
-                  </div>
-                </div>
-              )}
-              <div className="songs-heading">
-                <h3>
-                  歌曲片段{" "}
-                  <span className="count">{project?.clips.length || 0}</span>
-                </h3>
+            {notice && (
+              <div className="banner info" role="status">
+                {notice}
                 <button
-                  className="icon-button"
-                  onClick={addClip}
-                  disabled={!project || !!busy || processing}
-                  aria-label="在播放位置添加片段"
-                  title="在播放位置添加片段"
+                  className="dismiss"
+                  onClick={() => setNotice("")}
+                  aria-label="关闭提示"
                 >
-                  <Icon name="plus" size={18} />
+                  ×
                 </button>
               </div>
-              <div className="clip-list">
-                {project?.clips.map((c, i) => (
-                  <button
-                    className={`clip-item ${c.id === selected ? "selected" : ""}`}
-                    key={c.id}
-                    onClick={() => {
-                      setSelected(c.id);
-                      seek(c.start_ms);
-                    }}
-                  >
-                    <span className="clip-number">
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
-                    <div>
-                      <strong>{c.title || "未命名歌曲"}</strong>
-                      <span>{c.performer || "待填写演唱者"}</span>
-                      <code>
-                        {format(c.start_ms).slice(0, -4)} —{" "}
-                        {format(c.end_ms).slice(0, -4)}
-                      </code>
-                    </div>
-                    <span className="clip-origin">
-                      {c.detection === "manual" ? "手动" : "检测"}
-                    </span>
-                  </button>
-                ))}
-                {!project?.clips.length && (
-                  <div className="empty-clips">
-                    <Icon name="music" size={30} />
-                    <strong>还没有歌曲片段</strong>
-                    <p>
-                      导入直播后检测演唱片段，
-                      <br />
-                      或在播放位置手动添加。
-                    </p>
-                  </div>
-                )}
-              </div>
-              <div className="detect-area">
+            )}
+            {refreshPending && (
+              <div className="banner info">
+                后台任务已完成。请先保存修改，再重新载入项目以查看结果。
                 <button
-                  className="button detect-button"
-                  disabled={!project || blocked || !caps?.detector_ready}
-                  onClick={() => void run("detect")}
+                  disabled={dirty || !!busy}
+                  onClick={() => project && void load(project.id)}
                 >
-                  <Icon name="wave" size={17} />
-                  检测演唱片段
+                  重新载入
                 </button>
-                <p>
-                  {caps?.detector_ready
-                    ? "检测结果追加到列表，保留已有片段"
-                    : "检测模型未就绪，可先手动添加片段"}
-                </p>
-                {dirty && (
-                  <p className="save-hint">保存修改后可检测、导入歌词和导出</p>
-                )}
               </div>
-            </section>
-            <div className="center-column">
-              <section className="panel preview-panel">
-                <div className="panel-heading">
-                  <h3>画面预览</h3>
-                  <span className="small muted">
-                    {project ? "原始素材时间" : "等待导入素材"}
-                  </span>
-                </div>
-                <div className={`video-stage ${!project ? "empty-stage" : ""}`}>
-                  {project ? (
-                    <>
-                      <video
-                        key={`${project.id}-${project.preview_file}`}
-                        ref={media}
-                        src={api.media(project)}
-                        controls
-                        preload="metadata"
-                        onTimeUpdate={(e) =>
-                          setNow(Math.round(e.currentTarget.currentTime * 1000))
-                        }
-                        onError={() => setMediaError(true)}
-                        onLoadedData={() => setMediaError(false)}
-                      />
-                      {!project.has_video && (
-                        <div className="audio-note">
-                          <Icon name="music" size={42} />
-                          <span>音频素材</span>
-                        </div>
-                      )}
-                      {clip?.subtitle.enabled && lyric && (
-                        <div
-                          className={`lyric-preview ${clip.subtitle.layout}`}
-                          style={{
-                            color: clip.subtitle.color,
-                            bottom: `${Math.min(30, clip.subtitle.margin_bottom / 5)}%`,
-                            fontSize: `${Math.min(30, clip.subtitle.font_size / 2)}px`,
-                          }}
-                        >
-                          {lyric.text}
-                        </div>
-                      )}
-                      {mediaError && (
-                        <div className="media-error">
-                          <strong>浏览器暂时无法播放此素材</strong>
-                          <p>生成兼容预览后继续剪辑，原始素材会用于导出。</p>
-                          <button
-                            className="button"
-                            disabled={blocked || !caps?.ffmpeg}
-                            onClick={() => void run("preview")}
-                          >
-                            生成兼容预览
-                          </button>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="stage-invite">
-                      <div className="record-art">
-                        <div />
-                        <Icon name="music" size={38} />
-                      </div>
-                      <h3>
-                        {loading
-                          ? "正在连接本地工作空间…"
-                          : "你的下一支歌切，从这里开始"}
-                      </h3>
-                      <p>导入 MP4 / FLV 直播录像，试听、裁切，再配上歌词。</p>
-                      <button
-                        className="button light"
-                        disabled={!!busy || loading}
-                        onClick={() => upload.current?.click()}
-                      >
-                        <Icon name="upload" size={17} /> 选择直播录像
-                      </button>
-                    </div>
-                  )}
-                </div>
-                {project && (
-                  <Timeline
-                    duration={project.duration_ms}
-                    now={now}
-                    clip={clip}
-                    fps={fps}
-                    disabled={!!busy}
-                    onSeek={seek}
-                    onBoundary={boundary}
-                  />
-                )}
-                <div className="preview-footer">
-                  <span>
-                    <span className="live-position" /> 播放位置{" "}
-                    <code>{format(now)}</code>
-                  </span>
-                  <span className="small muted">
-                    {project?.preview_file ? "兼容预览" : "原始画面"}
-                  </span>
-                </div>
-              </section>
-              <section className="panel trim-panel">
+            )}
+            <div className="workbench">
+              <section className="panel library">
                 <div className="panel-heading">
                   <h3>
-                    <Icon name="cut" size={17} /> 片段边界
+                    <Icon name="folder" size={17} /> 直播素材
                   </h3>
-                  {clip && (
-                    <span className="duration-chip">
-                      时长 {length(clip.end_ms - clip.start_ms)}
-                    </span>
+                  <span className="count">{projects.length}</span>
+                </div>
+                <label className="project-select">
+                  <span>当前项目</span>
+                  <select
+                    value={project?.id || ""}
+                    disabled={!!busy}
+                    onChange={(e) => void load(e.target.value)}
+                  >
+                    {!project && <option value="">选择项目</option>}
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {project && (
+                  <div className="source-summary">
+                    <div className="source-symbol">
+                      <Icon name="play" size={15} />
+                    </div>
+                    <div>
+                      <strong title={project.source_name}>
+                        {project.source_name}
+                      </strong>
+                      <span>
+                        {length(project.duration_ms)} ·{" "}
+                        {project.has_video ? "视频素材" : "音频素材"}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                <ModelSelector
+                  project={project}
+                  catalog={catalog}
+                  disabled={!!busy || processing}
+                  onChange={(patch) => {
+                    setProject((current) =>
+                      current ? { ...current, ...patch } : current,
+                    );
+                    setNotice("");
+                  }}
+                  onTrain={() => {
+                    media.current?.pause();
+                    setWorkspace("training");
+                  }}
+                />
+                {catalogError && (
+                  <p className="model-warning library-hint">
+                    {catalogError}{" "}
+                    <button
+                      className="text-action"
+                      onClick={() => void refreshCatalog()}
+                    >
+                      重新读取模型库
+                    </button>
+                  </p>
+                )}
+                <div className="songs-heading">
+                  <h3>
+                    歌曲片段{" "}
+                    <span className="count">{project?.clips.length || 0}</span>
+                  </h3>
+                  <button
+                    className="icon-button"
+                    onClick={addClip}
+                    disabled={!project || !!busy || processing}
+                    aria-label="在播放位置添加片段"
+                    title="在播放位置添加片段"
+                  >
+                    <Icon name="plus" size={18} />
+                  </button>
+                </div>
+                <div className="clip-list">
+                  {project?.clips.map((c, i) => (
+                    <button
+                      className={`clip-item ${c.id === selected ? "selected" : ""}`}
+                      key={c.id}
+                      onClick={() => {
+                        setSelected(c.id);
+                        seek(c.start_ms);
+                      }}
+                    >
+                      <span className="clip-number">
+                        {String(i + 1).padStart(2, "0")}
+                      </span>
+                      <div>
+                        <strong>{c.title || "未命名歌曲"}</strong>
+                        <span>{c.performer || "待填写演唱者"}</span>
+                        <code>
+                          {format(c.start_ms).slice(0, -4)} —{" "}
+                          {format(c.end_ms).slice(0, -4)}
+                        </code>
+                      </div>
+                      <span className="clip-origin">
+                        {c.detection === "manual" ? "手动" : "检测"}
+                      </span>
+                    </button>
+                  ))}
+                  {!project?.clips.length && (
+                    <div className="empty-clips">
+                      <Icon name="music" size={30} />
+                      <strong>还没有歌曲片段</strong>
+                      <p>
+                        导入直播后检测演唱片段，
+                        <br />
+                        或在播放位置手动添加。
+                      </p>
+                    </div>
                   )}
                 </div>
-                {clip && project ? (
-                  <>
-                    <div className="boundary-controls">
-                      {(["start_ms", "end_ms"] as const).map((edge, i) => (
-                        <div className="boundary" key={`${clip.id}-${edge}`}>
-                          <div className="boundary-label">
-                            <label htmlFor={edge}>
-                              {i === 0 ? "入点" : "出点"}
-                              <span>{i === 0 ? "I" : "O"}</span>
-                            </label>
+                <div className="detect-area">
+                  <button
+                    className="button detect-button"
+                    disabled={!project || blocked || !detectorReady}
+                    onClick={() => void run("detect")}
+                  >
+                    <Icon name="wave" size={17} />
+                    检测演唱片段
+                  </button>
+                  <p>
+                    {!project
+                      ? "先导入直播录像，再选择检测模型"
+                      : !catalog
+                        ? "正在读取模型信息…"
+                        : !project.detector_model_id
+                        ? "先选择目标主播的模型"
+                        : !detectorModel?.available
+                          ? "已选模型不可用，请重新选择"
+                          : !catalog?.engine_ready
+                            ? "模型环境未就绪，可先手动添加片段"
+                            : !detectorDevice?.available
+                              ? "所选设备不可用，请选择自动或 CPU"
+                              : "检测结果追加到列表，保留已有片段"}
+                  </p>
+                  {dirty && (
+                    <p className="save-hint">
+                      保存修改后可检测、导入歌词和导出
+                    </p>
+                  )}
+                </div>
+              </section>
+              <div className="center-column">
+                <section className="panel preview-panel">
+                  <div className="panel-heading">
+                    <h3>画面预览</h3>
+                    <span className="small muted">
+                      {project ? "原始素材时间" : "等待导入素材"}
+                    </span>
+                  </div>
+                  <div
+                    className={`video-stage ${!project ? "empty-stage" : ""}`}
+                  >
+                    {project ? (
+                      <>
+                        <video
+                          key={`${project.id}-${project.preview_file}`}
+                          ref={media}
+                          src={api.media(project)}
+                          controls
+                          preload="metadata"
+                          onTimeUpdate={(e) =>
+                            setNow(
+                              Math.round(e.currentTarget.currentTime * 1000),
+                            )
+                          }
+                          onError={() => setMediaError(true)}
+                          onLoadedData={() => setMediaError(false)}
+                        />
+                        {!project.has_video && (
+                          <div className="audio-note">
+                            <Icon name="music" size={42} />
+                            <span>音频素材</span>
+                          </div>
+                        )}
+                        {clip?.subtitle.enabled && lyric && (
+                          <div
+                            className={`lyric-preview ${clip.subtitle.layout}`}
+                            style={{
+                              color: clip.subtitle.color,
+                              bottom: `${Math.min(30, clip.subtitle.margin_bottom / 5)}%`,
+                              fontSize: `${Math.min(30, clip.subtitle.font_size / 2)}px`,
+                            }}
+                          >
+                            {lyric.text}
+                          </div>
+                        )}
+                        {mediaError && (
+                          <div className="media-error">
+                            <strong>浏览器暂时无法播放此素材</strong>
+                            <p>生成兼容预览后继续剪辑，原始素材会用于导出。</p>
                             <button
-                              onClick={() => boundary(edge, now)}
-                              disabled={!!busy}
+                              className="button"
+                              disabled={blocked || !caps?.ffmpeg}
+                              onClick={() => void run("preview")}
                             >
-                              使用播放位置
+                              生成兼容预览
                             </button>
                           </div>
-                          <div className="time-input timestamp-wrap">
-                            <TimecodeInput
-                              id={edge}
-                              value={clip[edge]}
-                              min={i === 0 ? 0 : clip.start_ms + 1}
-                              max={
-                                i === 0 ? clip.end_ms - 1 : project.duration_ms
-                              }
-                              disabled={!!busy}
-                              onChange={(value) => boundary(edge, value)}
-                              onValidity={(invalid) =>
-                                setInvalidTimes((previous) =>
-                                  previous[edge] === invalid
-                                    ? previous
-                                    : { ...previous, [edge]: invalid },
-                                )
-                              }
-                            />
-                            <button
-                              onClick={() => seek(clip[edge])}
-                              title="跳转到此位置"
-                              aria-label={`跳转到${i === 0 ? "入点" : "出点"}`}
-                            >
-                              <Icon name="play" size={14} />
-                            </button>
+                        )}
+                      </>
+                    ) : (
+                      <div className="stage-invite">
+                        <div className="record-art">
+                          <div />
+                          <Icon name="music" size={38} />
+                        </div>
+                        <h3>
+                          {loading
+                            ? "正在连接本地工作空间…"
+                            : "你的下一支歌切，从这里开始"}
+                        </h3>
+                        <p>导入 MP4 / FLV 直播录像，试听、裁切，再配上歌词。</p>
+                        <button
+                          className="button light"
+                          disabled={!!busy || loading}
+                          onClick={() => upload.current?.click()}
+                        >
+                          <Icon name="upload" size={17} /> 选择直播录像
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {project && (
+                    <Timeline
+                      duration={project.duration_ms}
+                      now={now}
+                      clip={clip}
+                      fps={fps}
+                      disabled={!!busy}
+                      onSeek={seek}
+                      onBoundary={boundary}
+                    />
+                  )}
+                  <div className="preview-footer">
+                    <span>
+                      <span className="live-position" /> 播放位置{" "}
+                      <code>{format(now)}</code>
+                    </span>
+                    <span className="small muted">
+                      {project?.preview_file ? "兼容预览" : "原始画面"}
+                    </span>
+                  </div>
+                </section>
+                <section className="panel trim-panel">
+                  <div className="panel-heading">
+                    <h3>
+                      <Icon name="cut" size={17} /> 片段边界
+                    </h3>
+                    {clip && (
+                      <span className="duration-chip">
+                        时长 {length(clip.end_ms - clip.start_ms)}
+                      </span>
+                    )}
+                  </div>
+                  {clip && project ? (
+                    <>
+                      <div className="boundary-controls">
+                        {(["start_ms", "end_ms"] as const).map((edge, i) => (
+                          <div className="boundary" key={`${clip.id}-${edge}`}>
+                            <div className="boundary-label">
+                              <label htmlFor={edge}>
+                                {i === 0 ? "入点" : "出点"}
+                                <span>{i === 0 ? "I" : "O"}</span>
+                              </label>
+                              <button
+                                onClick={() => boundary(edge, now)}
+                                disabled={!!busy}
+                              >
+                                使用播放位置
+                              </button>
+                            </div>
+                            <div className="time-input timestamp-wrap">
+                              <TimecodeInput
+                                id={edge}
+                                value={clip[edge]}
+                                min={i === 0 ? 0 : clip.start_ms + 1}
+                                max={
+                                  i === 0
+                                    ? clip.end_ms - 1
+                                    : project.duration_ms
+                                }
+                                disabled={!!busy}
+                                onChange={(value) => boundary(edge, value)}
+                                onValidity={(invalid) =>
+                                  setInvalidTimes((previous) =>
+                                    previous[edge] === invalid
+                                      ? previous
+                                      : { ...previous, [edge]: invalid },
+                                  )
+                                }
+                              />
+                              <button
+                                onClick={() => seek(clip[edge])}
+                                title="跳转到此位置"
+                                aria-label={`跳转到${i === 0 ? "入点" : "出点"}`}
+                              >
+                                <Icon name="play" size={14} />
+                              </button>
+                            </div>
+                            <div className="frame-nudges">
+                              <button
+                                disabled={!!busy}
+                                aria-label={`${i === 0 ? "入点" : "出点"}前移一帧`}
+                                onClick={() =>
+                                  boundary(
+                                    edge,
+                                    stepFrames(clip[edge], -1, 1, fps),
+                                  )
+                                }
+                              >
+                                ← 1 帧
+                              </button>
+                              <button
+                                disabled={!!busy}
+                                aria-label={`${i === 0 ? "入点" : "出点"}后移一帧`}
+                                onClick={() =>
+                                  boundary(
+                                    edge,
+                                    stepFrames(clip[edge], 1, 1, fps),
+                                  )
+                                }
+                              >
+                                1 帧 →
+                              </button>
+                            </div>
                           </div>
-                          <div className="frame-nudges">
-                            <button
-                              disabled={!!busy}
-                              aria-label={`${i === 0 ? "入点" : "出点"}前移一帧`}
-                              onClick={() =>
-                                boundary(
-                                  edge,
-                                  stepFrames(clip[edge], -1, 1, fps),
-                                )
-                              }
-                            >
-                              ← 1 帧
-                            </button>
-                            <button
-                              disabled={!!busy}
-                              aria-label={`${i === 0 ? "入点" : "出点"}后移一帧`}
-                              onClick={() =>
-                                boundary(
-                                  edge,
-                                  stepFrames(clip[edge], 1, 1, fps),
-                                )
-                              }
-                            >
-                              1 帧 →
-                            </button>
+                        ))}
+                      </div>
+                      <p className="trim-note">
+                        时间格式
+                        HH:MM:SS.mmm。拖动或微调边界不会移动已有歌词时间。
+                      </p>
+                    </>
+                  ) : (
+                    <div className="empty-trim">
+                      选择或添加一个片段，开始调整入点与出点。
+                    </div>
+                  )}
+                </section>
+                <section className="panel jobs-panel">
+                  <div className="panel-heading">
+                    <h3>
+                      <Icon name="download" size={17} /> 任务与导出
+                    </h3>
+                    <span className="small muted">自动更新</span>
+                  </div>
+                  {activeJobs.length ? (
+                    <div className="job-list">
+                      {[...activeJobs].reverse().map((j) => (
+                        <div className="job" key={j.id}>
+                          <div className="job-top">
+                            <strong>{jobLabels[j.kind] || j.kind}</strong>
+                            <span className={`status ${j.status}`}>
+                              {statuses[j.status]}
+                            </span>
                           </div>
+                          <p>{j.message || "等待任务处理"}</p>
+                          {(j.model_name || j.model_id) && (
+                            <p>
+                              实际检测模型：
+                              {j.model_name || j.model_id?.slice(0, 12)}
+                              {j.device ? ` · ${j.device}` : ""}
+                            </p>
+                          )}
+                          {j.status === "succeeded" &&
+                            j.artifacts.length > 0 && (
+                              <div className="downloads">
+                                {j.artifacts.map((name) => (
+                                  <a
+                                    key={name}
+                                    href={api.artifact(j, name)}
+                                    download
+                                  >
+                                    <Icon name="download" size={14} />
+                                    {name}
+                                  </a>
+                                ))}
+                              </div>
+                            )}
                         </div>
                       ))}
                     </div>
-                    <p className="trim-note">
-                      时间格式
-                      HH:MM:SS.mmm。拖动或微调边界不会移动已有歌词时间。
-                    </p>
+                  ) : (
+                    <div className="empty-jobs">
+                      导出的视频与音频会出现在这里。
+                    </div>
+                  )}
+                </section>
+              </div>
+              <section className="panel inspector">
+                <div className="inspector-tabs">
+                  <button
+                    className={tab === "details" ? "active" : ""}
+                    onClick={() => setTab("details")}
+                  >
+                    歌曲信息
+                  </button>
+                  <button
+                    className={tab === "lyrics" ? "active" : ""}
+                    onClick={() => setTab("lyrics")}
+                  >
+                    歌词与字幕
+                  </button>
+                  <button
+                    className={tab === "export" ? "active" : ""}
+                    onClick={() => setTab("export")}
+                  >
+                    导出设置
+                  </button>
+                </div>
+                {clip ? (
+                  <>
+                    <div className="inspector-content">
+                      {tab === "export" ? (
+                        <ExportControls
+                          value={output}
+                          disabled={!!busy}
+                          onChange={(export_settings) =>
+                            updateClip({ export_settings })
+                          }
+                        />
+                      ) : tab === "details" ? (
+                        <>
+                          <div className="inspector-intro">
+                            <span className="eyebrow">CLIP DETAILS</span>
+                            <h3>让每首歌，都有名字。</h3>
+                          </div>
+                          <label className="field">
+                            歌曲名称
+                            <input
+                              value={clip.title}
+                              placeholder="填写歌曲名称"
+                              disabled={!!busy}
+                              onChange={(e) =>
+                                updateClip({ title: e.target.value })
+                              }
+                            />
+                          </label>
+                          <label className="field">
+                            原唱
+                            <input
+                              value={clip.original_artist}
+                              placeholder="填写原唱歌手"
+                              disabled={!!busy}
+                              onChange={(e) =>
+                                updateClip({ original_artist: e.target.value })
+                              }
+                            />
+                          </label>
+                          <label className="field">
+                            演唱者 / VTuber
+                            <input
+                              value={clip.performer}
+                              placeholder="填写本场演唱者"
+                              disabled={!!busy}
+                              onChange={(e) =>
+                                updateClip({ performer: e.target.value })
+                              }
+                            />
+                          </label>
+                          <div className="pending-feature">
+                            <span className="tiny-tag">待接入</span>
+                            <strong>自动识曲</strong>
+                            <p>
+                              当前请手动填写歌曲信息。
+                              <br />
+                              系统不会生成未验证的识曲结果。
+                            </p>
+                          </div>
+                          <div className="clip-facts">
+                            <span>
+                              片段来源
+                              <b>
+                                {clip.detection === "manual"
+                                  ? "手动添加"
+                                  : "演唱检测"}
+                              </b>
+                            </span>
+                            <span>
+                              歌词行数<b>{clip.lyrics.length} 行</b>
+                            </span>
+                          </div>
+                          <button
+                            className="delete-button"
+                            disabled={!!busy || processing}
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  "删除这个歌曲片段？原始素材会保留。",
+                                )
+                              ) {
+                                setProject((p) =>
+                                  p
+                                    ? {
+                                        ...p,
+                                        clips: p.clips.filter(
+                                          (c) => c.id !== clip.id,
+                                        ),
+                                      }
+                                    : p,
+                                );
+                                setSelected(
+                                  project?.clips.find((c) => c.id !== clip.id)
+                                    ?.id || "",
+                                );
+                              }
+                            }}
+                          >
+                            删除此片段
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <div className="inspector-intro">
+                            <span className="eyebrow">LYRICS & SUBTITLES</span>
+                            <h3>为歌声，添上字幕。</h3>
+                          </div>
+                          <label className="file-pick">
+                            导入 .lrc 文件
+                            <input
+                              type="file"
+                              accept=".lrc,text/plain"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  try {
+                                    setLrc(await file.text());
+                                  } catch (err) {
+                                    fail(err);
+                                  }
+                                }
+                                e.target.value = "";
+                              }}
+                            />
+                          </label>
+                          <label className="field">
+                            LRC 歌词
+                            <textarea
+                              rows={5}
+                              value={lrc}
+                              onChange={(e) => setLrc(e.target.value)}
+                              placeholder={
+                                "[00:12.50]第一句歌词\n[00:18.20]第二句歌词"
+                              }
+                            />
+                          </label>
+                          <label className="field">
+                            歌词偏移（秒）
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={offset}
+                              onChange={(e) =>
+                                setOffset(Number(e.target.value))
+                              }
+                            />
+                            <small>歌词时间相对片段入点，正值延后显示。</small>
+                          </label>
+                          <button
+                            className="button full"
+                            disabled={blocked || !lrc.trim()}
+                            onClick={() => void importLyrics()}
+                          >
+                            导入歌词到此片段
+                          </button>
+                          <div className="section-rule" />
+                          <label className="toggle-row">
+                            <span>导出时烧录字幕</span>
+                            <input
+                              type="checkbox"
+                              checked={clip.subtitle.enabled}
+                              disabled={!!busy || !caps?.subtitle_burn}
+                              onChange={(e) =>
+                                updateClip({
+                                  subtitle: {
+                                    ...clip.subtitle,
+                                    enabled: e.target.checked,
+                                  },
+                                })
+                              }
+                            />
+                          </label>
+                          {!caps?.subtitle_burn && (
+                            <p className="small muted">
+                              当前环境尚不支持字幕烧录。
+                            </p>
+                          )}
+                          <label className="field">
+                            字幕样式
+                            <select
+                              value={clip.subtitle.layout}
+                              disabled={!!busy}
+                              onChange={(e) =>
+                                updateClip({
+                                  subtitle: {
+                                    ...clip.subtitle,
+                                    layout: e.target
+                                      .value as Clip["subtitle"]["layout"],
+                                  },
+                                })
+                              }
+                            >
+                              <option value="single">单行字幕</option>
+                              <option value="double">双行字幕</option>
+                              <option value="ktv">左右双行（KTV）</option>
+                            </select>
+                          </label>
+                          <div className="field-row">
+                            <label className="field">
+                              字号
+                              <input
+                                type="number"
+                                min={16}
+                                max={100}
+                                value={clip.subtitle.font_size}
+                                disabled={!!busy}
+                                onChange={(e) =>
+                                  updateClip({
+                                    subtitle: {
+                                      ...clip.subtitle,
+                                      font_size: Number(e.target.value),
+                                    },
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="field">
+                              底部边距
+                              <input
+                                type="number"
+                                min={0}
+                                max={400}
+                                value={clip.subtitle.margin_bottom}
+                                disabled={!!busy}
+                                onChange={(e) =>
+                                  updateClip({
+                                    subtitle: {
+                                      ...clip.subtitle,
+                                      margin_bottom: Number(e.target.value),
+                                    },
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+                          <div className="field-row color-fields">
+                            <label className="field">
+                              文字颜色
+                              <input
+                                type="color"
+                                value={clip.subtitle.color}
+                                disabled={!!busy}
+                                onChange={(e) =>
+                                  updateClip({
+                                    subtitle: {
+                                      ...clip.subtitle,
+                                      color: e.target.value,
+                                    },
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="field">
+                              高亮颜色
+                              <input
+                                type="color"
+                                value={clip.subtitle.highlight}
+                                disabled={!!busy}
+                                onChange={(e) =>
+                                  updateClip({
+                                    subtitle: {
+                                      ...clip.subtitle,
+                                      highlight: e.target.value,
+                                    },
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+                          <p className="small muted">
+                            预览显示当前歌词行，最终字幕样式以导出视频为准。
+                          </p>
+                          <div className="pending-feature compact">
+                            <span className="tiny-tag">待接入</span>
+                            <strong>自动逐字对齐</strong>
+                            <p>
+                              KTV 样式仅在存在逐字时间时逐字高亮；普通 LRC
+                              使用整行时间。
+                            </p>
+                          </div>
+                          {clip.lyrics.length > 0 && (
+                            <details className="lyrics-list">
+                              <summary>
+                                已导入 {clip.lyrics.length} 行歌词
+                              </summary>
+                              {clip.lyrics.map((l, i) => (
+                                <button
+                                  key={i}
+                                  onClick={() => seek(l.start_ms)}
+                                >
+                                  <code>{format(l.start_ms).slice(0, -4)}</code>
+                                  {l.text}
+                                </button>
+                              ))}
+                            </details>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    <div className="export-area">
+                      <button
+                        className="button primary full"
+                        disabled={
+                          blocked ||
+                          !caps?.ffmpeg ||
+                          (!output.video && !output.audio)
+                        }
+                        onClick={() => void run("export")}
+                      >
+                        <Icon name="download" size={17} /> 导出 {outputLabel}
+                      </button>
+                      <p>
+                        {dirty
+                          ? "先保存修改，再导出当前片段"
+                          : processing
+                            ? "任务处理中，完成后可继续操作"
+                            : !caps?.ffmpeg
+                              ? "请先安装 FFmpeg 以启用导出"
+                              : "当前片段 · 输出文件保存在本地"}
+                      </p>
+                    </div>
                   </>
                 ) : (
-                  <div className="empty-trim">
-                    选择或添加一个片段，开始调整入点与出点。
-                  </div>
-                )}
-              </section>
-              <section className="panel jobs-panel">
-                <div className="panel-heading">
-                  <h3>
-                    <Icon name="download" size={17} /> 任务与导出
-                  </h3>
-                  <span className="small muted">自动更新</span>
-                </div>
-                {activeJobs.length ? (
-                  <div className="job-list">
-                    {[...activeJobs].reverse().map((j) => (
-                      <div className="job" key={j.id}>
-                        <div className="job-top">
-                          <strong>{jobLabels[j.kind] || j.kind}</strong>
-                          <span className={`status ${j.status}`}>
-                            {statuses[j.status]}
-                          </span>
-                        </div>
-                        <p>{j.message || "等待任务处理"}</p>
-                        {j.status === "succeeded" && j.artifacts.length > 0 && (
-                          <div className="downloads">
-                            {j.artifacts.map((name) => (
-                              <a
-                                key={name}
-                                href={api.artifact(j, name)}
-                                download
-                              >
-                                <Icon name="download" size={14} />
-                                {name}
-                              </a>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="empty-jobs">
-                    导出的视频与音频会出现在这里。
+                  <div className="inspector-empty">
+                    <Icon name="settings" size={32} />
+                    <h3>选中一首，开始打磨</h3>
+                    <p>
+                      歌曲信息、歌词和导出设置
+                      <br />
+                      会在这里展开。
+                    </p>
                   </div>
                 )}
               </section>
             </div>
-            <section className="panel inspector">
-              <div className="inspector-tabs">
-                <button
-                  className={tab === "details" ? "active" : ""}
-                  onClick={() => setTab("details")}
-                >
-                  歌曲信息
-                </button>
-                <button
-                  className={tab === "lyrics" ? "active" : ""}
-                  onClick={() => setTab("lyrics")}
-                >
-                  歌词与字幕
-                </button>
-                <button
-                  className={tab === "export" ? "active" : ""}
-                  onClick={() => setTab("export")}
-                >
-                  导出设置
-                </button>
-              </div>
-              {clip ? (
-                <>
-                  <div className="inspector-content">
-                    {tab === "export" ? (
-                      <ExportControls
-                        value={output}
-                        disabled={!!busy}
-                        onChange={(export_settings) =>
-                          updateClip({ export_settings })
-                        }
-                      />
-                    ) : tab === "details" ? (
-                      <>
-                        <div className="inspector-intro">
-                          <span className="eyebrow">CLIP DETAILS</span>
-                          <h3>让每首歌，都有名字。</h3>
-                        </div>
-                        <label className="field">
-                          歌曲名称
-                          <input
-                            value={clip.title}
-                            placeholder="填写歌曲名称"
-                            disabled={!!busy}
-                            onChange={(e) =>
-                              updateClip({ title: e.target.value })
-                            }
-                          />
-                        </label>
-                        <label className="field">
-                          原唱
-                          <input
-                            value={clip.original_artist}
-                            placeholder="填写原唱歌手"
-                            disabled={!!busy}
-                            onChange={(e) =>
-                              updateClip({ original_artist: e.target.value })
-                            }
-                          />
-                        </label>
-                        <label className="field">
-                          演唱者 / VTuber
-                          <input
-                            value={clip.performer}
-                            placeholder="填写本场演唱者"
-                            disabled={!!busy}
-                            onChange={(e) =>
-                              updateClip({ performer: e.target.value })
-                            }
-                          />
-                        </label>
-                        <div className="pending-feature">
-                          <span className="tiny-tag">待接入</span>
-                          <strong>自动识曲</strong>
-                          <p>
-                            当前请手动填写歌曲信息。
-                            <br />
-                            系统不会生成未验证的识曲结果。
-                          </p>
-                        </div>
-                        <div className="clip-facts">
-                          <span>
-                            片段来源
-                            <b>
-                              {clip.detection === "manual"
-                                ? "手动添加"
-                                : "演唱检测"}
-                            </b>
-                          </span>
-                          <span>
-                            歌词行数<b>{clip.lyrics.length} 行</b>
-                          </span>
-                        </div>
-                        <button
-                          className="delete-button"
-                          disabled={!!busy || processing}
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                "删除这个歌曲片段？原始素材会保留。",
-                              )
-                            ) {
-                              setProject((p) =>
-                                p
-                                  ? {
-                                      ...p,
-                                      clips: p.clips.filter(
-                                        (c) => c.id !== clip.id,
-                                      ),
-                                    }
-                                  : p,
-                              );
-                              setSelected(
-                                project?.clips.find((c) => c.id !== clip.id)
-                                  ?.id || "",
-                              );
-                            }
-                          }}
-                        >
-                          删除此片段
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="inspector-intro">
-                          <span className="eyebrow">LYRICS & SUBTITLES</span>
-                          <h3>为歌声，添上字幕。</h3>
-                        </div>
-                        <label className="file-pick">
-                          导入 .lrc 文件
-                          <input
-                            type="file"
-                            accept=".lrc,text/plain"
-                            onChange={async (e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                try {
-                                  setLrc(await file.text());
-                                } catch (err) {
-                                  fail(err);
-                                }
-                              }
-                              e.target.value = "";
-                            }}
-                          />
-                        </label>
-                        <label className="field">
-                          LRC 歌词
-                          <textarea
-                            rows={5}
-                            value={lrc}
-                            onChange={(e) => setLrc(e.target.value)}
-                            placeholder={
-                              "[00:12.50]第一句歌词\n[00:18.20]第二句歌词"
-                            }
-                          />
-                        </label>
-                        <label className="field">
-                          歌词偏移（秒）
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={offset}
-                            onChange={(e) => setOffset(Number(e.target.value))}
-                          />
-                          <small>歌词时间相对片段入点，正值延后显示。</small>
-                        </label>
-                        <button
-                          className="button full"
-                          disabled={blocked || !lrc.trim()}
-                          onClick={() => void importLyrics()}
-                        >
-                          导入歌词到此片段
-                        </button>
-                        <div className="section-rule" />
-                        <label className="toggle-row">
-                          <span>导出时烧录字幕</span>
-                          <input
-                            type="checkbox"
-                            checked={clip.subtitle.enabled}
-                            disabled={!!busy || !caps?.subtitle_burn}
-                            onChange={(e) =>
-                              updateClip({
-                                subtitle: {
-                                  ...clip.subtitle,
-                                  enabled: e.target.checked,
-                                },
-                              })
-                            }
-                          />
-                        </label>
-                        {!caps?.subtitle_burn && (
-                          <p className="small muted">
-                            当前环境尚不支持字幕烧录。
-                          </p>
-                        )}
-                        <label className="field">
-                          字幕样式
-                          <select
-                            value={clip.subtitle.layout}
-                            disabled={!!busy}
-                            onChange={(e) =>
-                              updateClip({
-                                subtitle: {
-                                  ...clip.subtitle,
-                                  layout: e.target
-                                    .value as Clip["subtitle"]["layout"],
-                                },
-                              })
-                            }
-                          >
-                            <option value="single">单行字幕</option>
-                            <option value="double">双行字幕</option>
-                            <option value="ktv">左右双行（KTV）</option>
-                          </select>
-                        </label>
-                        <div className="field-row">
-                          <label className="field">
-                            字号
-                            <input
-                              type="number"
-                              min={16}
-                              max={100}
-                              value={clip.subtitle.font_size}
-                              disabled={!!busy}
-                              onChange={(e) =>
-                                updateClip({
-                                  subtitle: {
-                                    ...clip.subtitle,
-                                    font_size: Number(e.target.value),
-                                  },
-                                })
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            底部边距
-                            <input
-                              type="number"
-                              min={0}
-                              max={400}
-                              value={clip.subtitle.margin_bottom}
-                              disabled={!!busy}
-                              onChange={(e) =>
-                                updateClip({
-                                  subtitle: {
-                                    ...clip.subtitle,
-                                    margin_bottom: Number(e.target.value),
-                                  },
-                                })
-                              }
-                            />
-                          </label>
-                        </div>
-                        <div className="field-row color-fields">
-                          <label className="field">
-                            文字颜色
-                            <input
-                              type="color"
-                              value={clip.subtitle.color}
-                              disabled={!!busy}
-                              onChange={(e) =>
-                                updateClip({
-                                  subtitle: {
-                                    ...clip.subtitle,
-                                    color: e.target.value,
-                                  },
-                                })
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            高亮颜色
-                            <input
-                              type="color"
-                              value={clip.subtitle.highlight}
-                              disabled={!!busy}
-                              onChange={(e) =>
-                                updateClip({
-                                  subtitle: {
-                                    ...clip.subtitle,
-                                    highlight: e.target.value,
-                                  },
-                                })
-                              }
-                            />
-                          </label>
-                        </div>
-                        <p className="small muted">
-                          预览显示当前歌词行，最终字幕样式以导出视频为准。
-                        </p>
-                        <div className="pending-feature compact">
-                          <span className="tiny-tag">待接入</span>
-                          <strong>自动逐字对齐</strong>
-                          <p>
-                            KTV 样式仅在存在逐字时间时逐字高亮；普通 LRC
-                            使用整行时间。
-                          </p>
-                        </div>
-                        {clip.lyrics.length > 0 && (
-                          <details className="lyrics-list">
-                            <summary>
-                              已导入 {clip.lyrics.length} 行歌词
-                            </summary>
-                            {clip.lyrics.map((l, i) => (
-                              <button key={i} onClick={() => seek(l.start_ms)}>
-                                <code>{format(l.start_ms).slice(0, -4)}</code>
-                                {l.text}
-                              </button>
-                            ))}
-                          </details>
-                        )}
-                      </>
-                    )}
-                  </div>
-                  <div className="export-area">
-                    <button
-                      className="button primary full"
-                      disabled={
-                        blocked ||
-                        !caps?.ffmpeg ||
-                        (!output.video && !output.audio)
-                      }
-                      onClick={() => void run("export")}
-                    >
-                      <Icon name="download" size={17} /> 导出 {outputLabel}
-                    </button>
-                    <p>
-                      {dirty
-                        ? "先保存修改，再导出当前片段"
-                        : processing
-                          ? "任务处理中，完成后可继续操作"
-                          : !caps?.ffmpeg
-                            ? "请先安装 FFmpeg 以启用导出"
-                            : "当前片段 · 输出文件保存在本地"}
-                    </p>
-                  </div>
-                </>
-              ) : (
-                <div className="inspector-empty">
-                  <Icon name="settings" size={32} />
-                  <h3>选中一首，开始打磨</h3>
-                  <p>
-                    歌曲信息、歌词和导出设置
-                    <br />
-                    会在这里展开。
-                  </p>
-                </div>
-              )}
-            </section>
           </div>
+          <TrainingWorkspace
+            active={workspace === "training"}
+            catalog={catalog}
+            onModelsChanged={() => void refreshCatalog()}
+            onUseModel={(model) => void useModel(model)}
+            modelManager={
+              <ModelManager
+                catalog={catalog}
+                onImported={async () => {
+                  await refreshCatalog();
+                }}
+                onUse={(model) => void useModel(model)}
+              />
+            }
+          />
           <footer className="app-footer">
             <span>拾歌 · 留住每一段好声音</span>
             <span>素材与处理均在本地完成</span>

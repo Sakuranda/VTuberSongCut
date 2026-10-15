@@ -12,10 +12,13 @@ class Studio:
     def __init__(self, data: Path, store: Store, runner: JobRunner, detector: SingingDetector, media: FFmpegMedia):
         self.data, self.store, self.runner, self.detector, self.media = data, store, runner, detector, media
 
-    def detect(self, ident: str):
+    def detect(self, ident: str, detector: SingingDetector | None = None, model_info: dict | None = None):
         project = self.store.get(ident)
+        selected_detector = detector or self.detector
+        if selected_detector is None:
+            raise ValueError("请先选择主播声线模型")
         def operation(job_id):
-            clips = self.detector.detect(Path(project.source_file), self.data / "jobs" / job_id, project.duration_ms)
+            clips = selected_detector.detect(Path(project.source_file), self.data / "jobs" / job_id, project.duration_ms)
             # Keep manual edits: append to the newest revision, still reject concurrent writes.
             current = self.store.get(ident)
             for clip in clips:
@@ -24,7 +27,7 @@ class Studio:
                     current.clips.append(clip)
             self.store.save(current, current.revision)
             return []
-        return self.runner.submit(ident, "detect", operation, project.revision)
+        return self.runner.submit(ident, "detect", operation, project.revision, model_info)
 
     def preview(self, ident: str):
         project = self.store.get(ident)
