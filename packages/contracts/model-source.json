@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/anAtheist987/AutoSlicer-v2.git",
+  "base_commit": "14445e7fb8344f36f8cbb859ef5a83ce0723e4cd",
+  "local_patch_commit": "439f75a4db8bbd49c363bcef292f4e545455225f",
+  "checkpoint_url": "https://github.com/anAtheist987/AutoSlicer-v2/releases/download/v2.1.0/best.pt",
+  "checkpoint_sha256": "ea42cb11ae7b833cd45af749353577c90bcba74d9ed0ff3dbb98ba3e5247b1c8",
+  "target": "阿梓",
+  "scope": "singer-specific singing detection; not voice conversion or song-title recognition"
+}

@@ -1,0 +1,1 @@
+"""VTuber SongCut application service."""

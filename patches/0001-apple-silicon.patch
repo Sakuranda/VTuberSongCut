@@ -1,0 +1,733 @@
+From 439f75a4db8bbd49c363bcef292f4e545455225f Mon Sep 17 00:00:00 2001
+From: Sakuranda <lysakuranda@gmail.com>
+Date: Thu, 15 Oct 2026 10:38:56 +0800
+Subject: [PATCH] Support Apple Silicon MPS in supervised training and
+ inference
+
+---
+ README.md                     |  48 +++++++++++++
+ pyproject.toml                |   1 +
+ scripts/cache_fullband.py     |   4 +-
+ scripts/eval_dump.py          |   6 +-
+ scripts/gold_azusa.py         |   4 +-
+ src/bilibili.py               |   5 +-
+ src/devices.py                |  40 +++++++++++
+ src/features.py               |  10 ++-
+ src/infer.py                  |  23 +++----
+ src/train.py                  |  12 ++--
+ tests/test_apple_silicon.py   | 126 ++++++++++++++++++++++++++++++++++
+ tests/test_devices.py         |  71 +++++++++++++++++++
+ tests/test_ffmpeg_override.py |  87 +++++++++++++++++++++++
+ 13 files changed, 412 insertions(+), 25 deletions(-)
+ create mode 100644 src/devices.py
+ create mode 100644 tests/test_apple_silicon.py
+ create mode 100644 tests/test_devices.py
+ create mode 100644 tests/test_ffmpeg_override.py
+
+diff --git a/README.md b/README.md
+index 3471d58..3aad7e9 100644
+--- a/README.md
++++ b/README.md
+@@ -49,6 +49,7 @@ out/
+ git clone https://github.com/anAtheist987/AutoSlicer-v2.git && cd AutoSlicer-v2
+ pip install .            # 推理依赖;装完有 autoslicer / autoslicer-dl 两个命令
+ # ffmpeg 需要在 PATH 里:apt install ffmpeg / brew install ffmpeg
++# 或指定可执行文件:export AUTOSLICER_FFMPEG="/path/to/ffmpeg"
+ 
+ # 下载模型(阿梓声线版,Releases 页也可手动下)
+ wget https://github.com/anAtheist987/AutoSlicer-v2/releases/download/v2.1.0/best.pt
+@@ -56,6 +57,53 @@ wget https://github.com/anAtheist987/AutoSlicer-v2/releases/download/v2.1.0/best
+ 
+ 训练自己的模型装完整依赖:`pip install ".[train]"`。
+ 
++### Apple Silicon (M1/M2/M3/M4 等)
++
++原生 arm64 Python 环境下可用 PyTorch 的 MPS 后端训练和推理。推理、人工标注
++路线的训练/验证、`cache_fullband.py` 和 `gold_azusa.py` 支持 `--device`:
++默认 `auto` 依次选择 CUDA、MPS、CPU;也可明确指定 `cpu`、`mps`、`cuda` 或
++`cuda:N`。`--gpu N` 仍用于选择 CUDA 卡号,明确指定不可用的设备会报错。
++
++```bash
++python -m venv .venv
++source .venv/bin/activate
++python -m pip install . tensorboard  # 人工标注路线训练所需的最小依赖
++brew install ffmpeg
++python -c "import torch; print('MPS available:', torch.backends.mps.is_available())"
++
++# 本地推理;也可省略 --device 使用自动选择
++python src/infer.py --device mps --input 录播.flv --checkpoint best.pt --out-dir out/
++
++# 按下面路线 A 准备真实标注和 manifest 后训练;先用小 batch 检查内存用量
++python src/train.py --device mps --model crnn --run-name my_streamer_mps \
++    --classes 4 --batch-size 2 --num-workers 0 \
++    --manifest data/processed/v2_train.json --val-manifest data/processed/v2_val.json \
++    --steps 8000 --val-every 1000
++python scripts/eval_dump.py --device mps --checkpoint runs/my_streamer_mps/best.pt \
++    --val-manifest data/processed/v2_val.json --out-dir runs/my_streamer_mps/val_probs
++```
++
++MPS 模型前向、反向和优化器使用 FP32;log-mel/STFT 特征在 CPU 上计算,再传给
++MPS 模型,以避开复数运算兼容性问题。CPU 同样使用 FP32;CUDA 在支持 BF16 的
++卡上使用 BF16 autocast,其余使用 FP32。MPS 无需设置 `PYTORCH_ENABLE_MPS_FALLBACK`。
++上述 NVIDIA 训练耗时和显存数据不代表 Apple Silicon 的性能。
++
++本次适配覆盖人工标注的 mel/CRNN 主流程。路线 B 的 Demucs 分离和合成脚本
++(`separate_all.py`、`make_synthetic.py`),以及实验性 PANNs 特征提取
++(`cache_features.py`、`cache_panns_emb.py`、`src/panns.py`)尚未适配 MPS。
++
++兼容性回归测试无需额外测试库;提供发布模型可额外检查 CPU/MPS 推理概率一致性:
++
++```bash
++python -m unittest discover -s tests -v
++AUTOSLICER_CHECKPOINT="$PWD/best.pt" python -m unittest discover -s tests -v
++```
++
++测试使用合成音频/缓存特征,覆盖默认四类 CRNN 的梯度和参数更新、两步真实训练
++命令、检查点保存/读取、验证概率导出和发布模型的 CPU/MPS 概率对比。无 MPS 时
++相应测试会跳过。这些检查验证运行兼容性,不能替代真实标注 VOD 的完整训练和
++准确率评估,也不能证明新主播声线的效果。
++
+ ### 或者用 Docker(免装环境)
+ 
+ ```bash
+diff --git a/pyproject.toml b/pyproject.toml
+index 41e112b..05a377c 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -45,6 +45,7 @@ package-dir = { "" = "src" }
+ py-modules = [
+     "bilibili",
+     "dataset",
++    "devices",
+     "features",
+     "infer",
+     "metrics",
+diff --git a/scripts/cache_fullband.py b/scripts/cache_fullband.py
+index 62c2357..61202c6 100644
+--- a/scripts/cache_fullband.py
++++ b/scripts/cache_fullband.py
+@@ -22,8 +22,10 @@ DIRS = ['歌回【东雪莲】', '歌回【小柔channel】', '歌回【月隐
+ def main():
+     ap = argparse.ArgumentParser()
+     ap.add_argument('--gpu', type=int, default=1)
++    ap.add_argument('--device', default='auto', help='auto, cpu, mps, cuda, or cuda:N')
+     args = ap.parse_args()
+-    device = f'cuda:{args.gpu}'
++    from devices import resolve_device
++    device = resolve_device(args.device, args.gpu)
+     from features import FeatureConfig, extract_logmel_file
+     fcfg = FeatureConfig()
+ 
+diff --git a/scripts/eval_dump.py b/scripts/eval_dump.py
+index bff68db..eb40d8f 100644
+--- a/scripts/eval_dump.py
++++ b/scripts/eval_dump.py
+@@ -25,8 +25,10 @@ def main():
+     ap.add_argument('--val-manifest', required=True)
+     ap.add_argument('--gpu', type=int, default=0)
+     ap.add_argument('--out-dir', required=True)
++    ap.add_argument('--device', default='auto', help='auto, cpu, mps, cuda, or cuda:N')
+     args = ap.parse_args()
+-    device = torch.device(f'cuda:{args.gpu}')
++    from devices import resolve_device, autocast_context
++    device = resolve_device(args.device, args.gpu)
+ 
+     ckpt = torch.load(args.checkpoint, map_location='cpu', weights_only=False)
+     targs = ckpt['args']
+@@ -58,7 +60,7 @@ def main():
+                 else:
+                     x = np.asarray(mel[a:b], dtype=np.float32)
+                 x = torch.from_numpy(x)[None].to(device)
+-                with torch.autocast('cuda', dtype=torch.bfloat16):
++                with autocast_context(device):
+                     logits = model(x)[0].float().cpu().numpy()
+                 m = min(len(logits), b - a)
+                 if logits.ndim == 2:  # multiclass: P(class 1)
+diff --git a/scripts/gold_azusa.py b/scripts/gold_azusa.py
+index dcf38af..8fb2059 100644
+--- a/scripts/gold_azusa.py
++++ b/scripts/gold_azusa.py
+@@ -47,8 +47,10 @@ def parse_marks(p: Path) -> list[tuple[float, float]]:
+ def main():
+     ap = argparse.ArgumentParser()
+     ap.add_argument('--gpu', type=int, default=0)
++    ap.add_argument('--device', default='auto', help='auto, cpu, mps, cuda, or cuda:N')
+     args = ap.parse_args()
+-    device = f'cuda:{args.gpu}'
++    from devices import resolve_device
++    device = resolve_device(args.device, args.gpu)
+ 
+     from features import FeatureConfig, extract_logmel_file
+     fcfg = FeatureConfig()
+diff --git a/src/bilibili.py b/src/bilibili.py
+index 05bd684..aa8246f 100644
+--- a/src/bilibili.py
++++ b/src/bilibili.py
+@@ -17,6 +17,7 @@ streamers' rights to their content.
+ from __future__ import annotations
+ 
+ import argparse
++import os
+ import re
+ import subprocess
+ import time
+@@ -141,7 +142,7 @@ def download(url_or_id: str, out_dir: Path, want_video: bool = False,
+ 
+     if not want_video:
+         out = out_dir / f"{title}.m4a"
+-        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(a_raw),
++        subprocess.run([os.environ.get("AUTOSLICER_FFMPEG") or "ffmpeg", "-y", "-v", "error", "-i", str(a_raw),
+                         "-c", "copy", str(out)], check=True)
+         a_raw.unlink()
+         return out
+@@ -152,7 +153,7 @@ def download(url_or_id: str, out_dir: Path, want_video: bool = False,
+           f"{video['codecs']}", flush=True)
+     _download([video["baseUrl"]] + (video.get("backupUrl") or []), v_raw, cookie)
+     out = out_dir / f"{title}.mp4"
+-    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(v_raw), "-i", str(a_raw),
++    subprocess.run([os.environ.get("AUTOSLICER_FFMPEG") or "ffmpeg", "-y", "-v", "error", "-i", str(v_raw), "-i", str(a_raw),
+                     "-c", "copy", str(out)], check=True)
+     v_raw.unlink()
+     a_raw.unlink()
+diff --git a/src/devices.py b/src/devices.py
+new file mode 100644
+index 0000000..8c7bd5c
+--- /dev/null
++++ b/src/devices.py
+@@ -0,0 +1,40 @@
++"""Shared compute policy. MPS uses FP32 and a CPU spectral frontend."""
++from contextlib import nullcontext
++
++import torch
++
++
++def resolve_device(requested: str | torch.device | None = None, gpu: int = 0) -> torch.device:
++    """Prefer CUDA, then Apple MPS, then CPU; explicit requests never fall back."""
++    if requested in (None, "auto"):
++        requested = (f"cuda:{gpu}" if torch.cuda.is_available() else
++                     "mps" if torch.backends.mps.is_available() else "cpu")
++    device = torch.device(requested)
++    if device.type == "cuda":
++        if not torch.cuda.is_available():
++            raise ValueError("CUDA is unavailable; use --device cpu or --device mps")
++        index = device.index if device.index is not None else gpu
++        if index < 0 or index >= torch.cuda.device_count():
++            raise ValueError(f"CUDA device index {index} is unavailable")
++        device = torch.device(f"cuda:{index}")
++    elif device.type == "mps":
++        if not torch.backends.mps.is_available():
++            raise ValueError("MPS is unavailable; use --device cpu")
++    elif device.type != "cpu":
++        raise ValueError(f"Unsupported device: {device}")
++    return device
++
++
++def autocast_context(device: torch.device):
++    # BF16 is not supported on every CUDA GPU. Keep those devices in FP32 too.
++    if device.type == "cuda":
++        with torch.cuda.device(device):
++            if torch.cuda.is_bf16_supported():
++                return torch.autocast("cuda", dtype=torch.bfloat16)
++    return nullcontext()
++
++
++def feature_device(device: torch.device) -> torch.device:
++    # STFT creates complex tensors, which are not universally supported by MPS.
++    # Only feature extraction stays on CPU; model forward/backward stays on MPS.
++    return torch.device("cpu") if device.type == "mps" else device
+diff --git a/src/features.py b/src/features.py
+index bec05d7..e184f0e 100644
+--- a/src/features.py
++++ b/src/features.py
+@@ -8,12 +8,15 @@ Frame rate = 50 fps; CNN backbones further pool time by 16x -> 3.125 fps
+ from __future__ import annotations
+ 
+ import dataclasses
++import os
+ from pathlib import Path
+ 
+ import numpy as np
+ import torch
+ import torchaudio
+ 
++from devices import resolve_device, feature_device
++
+ 
+ @dataclasses.dataclass(frozen=True)
+ class FeatureConfig:
+@@ -65,7 +68,7 @@ def load_audio(path: str | Path, sample_rate: int = 16000) -> torch.Tensor:
+     except Exception:
+         # fall back to ffmpeg piping (handles video containers, m4a, etc.)
+         import subprocess
+-        cmd = ["ffmpeg", "-v", "error", "-i", path, "-f", "f32le",
++        cmd = [os.environ.get("AUTOSLICER_FFMPEG") or "ffmpeg", "-v", "error", "-i", path, "-f", "f32le",
+                "-ac", "1", "-ar", str(sample_rate), "-"]
+         raw = subprocess.run(cmd, capture_output=True, check=True).stdout
+         return torch.frombuffer(bytearray(raw), dtype=torch.float32)
+@@ -73,9 +76,10 @@ def load_audio(path: str | Path, sample_rate: int = 16000) -> torch.Tensor:
+ 
+ def extract_logmel_file(
+     path: str | Path, cfg: FeatureConfig = FeatureConfig(),
+-    device: str = "cpu", chunk_seconds: int = 600,
++    device: str | torch.device = "cpu", chunk_seconds: int = 600,
+ ) -> np.ndarray:
+     """Whole-file log-mel as float16 numpy [n_mels, T]; chunked to bound memory."""
++    device = feature_device(resolve_device(device))
+     frontend = LogMel(cfg).to(device)
+     wav = load_audio(path, cfg.sample_rate)
+     hop = cfg.hop_length
+@@ -92,7 +96,7 @@ def extract_logmel_file(
+ 
+ def cache_features(
+     audio_paths: list[Path], cache_dir: Path,
+-    cfg: FeatureConfig = FeatureConfig(), device: str = "cpu",
++    cfg: FeatureConfig = FeatureConfig(), device: str | torch.device = "cpu",
+ ) -> dict[str, Path]:
+     """Extract+cache log-mel for each file. Returns {stem: npy_path}."""
+     cache_dir = Path(cache_dir)
+diff --git a/src/infer.py b/src/infer.py
+index 09d87d6..13361c1 100644
+--- a/src/infer.py
++++ b/src/infer.py
+@@ -15,6 +15,7 @@ from __future__ import annotations
+ 
+ import argparse
+ import json
++import os
+ import subprocess
+ import sys
+ import time
+@@ -24,6 +25,7 @@ import numpy as np
+ import torch
+ 
+ sys.path.insert(0, str(Path(__file__).parent))
++from devices import resolve_device, autocast_context, feature_device
+ from features import FeatureConfig, LogMel, load_audio  # noqa: E402
+ from models import build_model  # noqa: E402
+ from postprocess import PostProcessConfig, probs_to_segments  # noqa: E402
+@@ -34,7 +36,8 @@ def predict_probs(wav: torch.Tensor, model: torch.nn.Module, device: torch.devic
+                   fcfg: FeatureConfig = FeatureConfig(),
+                   chunk_s: float = 600.0, overlap_s: float = 30.0) -> np.ndarray:
+     """Sliding-window inference over arbitrarily long audio -> probs at out_fps."""
+-    frontend = LogMel(fcfg).to(device)
++    frontend_device = feature_device(device)
++    frontend = LogMel(fcfg).to(frontend_device)
+     model = model.to(device).eval()
+     sr, hop, ratio = fcfg.sample_rate, fcfg.hop_length, fcfg.time_pool
+     out_fps = fcfg.output_frame_rate
+@@ -44,16 +47,12 @@ def predict_probs(wav: torch.Tensor, model: torch.nn.Module, device: torch.devic
+     chunk = int(chunk_s * sr // hop) * hop
+     overlap = int(overlap_s * sr // hop) * hop
+     step = chunk - overlap
+-    autocast_dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
+     for s in range(0, len(wav), step):
+-        seg = wav[s: s + chunk].to(device)
++        seg = wav[s: s + chunk].to(frontend_device)
+         if len(seg) < fcfg.n_fft:
+             break
+-        mel = frontend(seg)
+-        if device.type == "cuda":
+-            with torch.autocast("cuda", dtype=autocast_dtype):
+-                logits = model(mel)[0].float().cpu().numpy()
+-        else:
++        mel = frontend(seg).to(device)
++        with autocast_context(device):
+             logits = model(mel)[0].float().cpu().numpy()
+         o = int(s / hop / ratio)
+         m = min(len(logits), n_out_total - o)
+@@ -76,12 +75,12 @@ def cut_video(input_path: Path, segments: list[dict], out_dir: Path, stem: str)
+     for i, seg in enumerate(segments, 1):
+         out = out_dir / f"{stem}_song{i:02d}.mp4"
+         dur = seg["cut_end"] - seg["cut_start"]
+-        cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{seg['cut_start']:.2f}",
++        cmd = [os.environ.get("AUTOSLICER_FFMPEG") or "ffmpeg", "-y", "-v", "error", "-ss", f"{seg['cut_start']:.2f}",
+                "-i", str(input_path), "-t", f"{dur:.2f}",
+                "-c", "copy", "-avoid_negative_ts", "make_zero", str(out)]
+         r = subprocess.run(cmd, capture_output=True)
+         if r.returncode != 0:  # fall back to re-encode (e.g. odd containers)
+-            cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{seg['cut_start']:.2f}",
++            cmd = [os.environ.get("AUTOSLICER_FFMPEG") or "ffmpeg", "-y", "-v", "error", "-ss", f"{seg['cut_start']:.2f}",
+                    "-i", str(input_path), "-t", f"{dur:.2f}",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                    "-c:a", "aac", str(out)]
+@@ -97,7 +96,7 @@ def main():
+     ap.add_argument("--checkpoint", required=True)
+     ap.add_argument("--out-dir", default="out")
+     ap.add_argument("--gpu", type=int, default=0)
+-    ap.add_argument("--device", default=None, help="'cpu' to force CPU")
++    ap.add_argument("--device", default="auto", help="auto, cpu, mps, cuda, or cuda:N")
+     ap.add_argument("--cut-video", action="store_true")
+     ap.add_argument("--on-threshold", type=float, default=None)
+     ap.add_argument("--off-threshold", type=float, default=None)
+@@ -105,7 +104,7 @@ def main():
+     ap.add_argument("--cookie", default=None, help='bilibili "SESSDATA=..." for higher video quality')
+     args = ap.parse_args()
+ 
+-    device = torch.device(args.device if args.device else f"cuda:{args.gpu}")
++    device = resolve_device(args.device, args.gpu)
+     ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+     model_name = ckpt["args"]["model"]
+     model = build_model(model_name, **json.loads(ckpt["args"].get("model_kwargs", "{}")))
+diff --git a/src/train.py b/src/train.py
+index de740e5..926ddfc 100644
+--- a/src/train.py
++++ b/src/train.py
+@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader
+ from torch.utils.tensorboard import SummaryWriter
+ 
+ sys.path.insert(0, str(Path(__file__).parent))
++from devices import resolve_device, autocast_context
+ from dataset import VODWindows, WindowConfig, collate_numpy  # noqa: E402
+ from metrics import frame_metrics, event_metrics  # noqa: E402
+ from models import build_model, count_params  # noqa: E402
+@@ -32,7 +33,8 @@ def seed_all(seed: int = 42):
+     random.seed(seed)
+     np.random.seed(seed)
+     torch.manual_seed(seed)
+-    torch.cuda.manual_seed_all(seed)
++    if torch.cuda.is_available():
++        torch.cuda.manual_seed_all(seed)
+ 
+ 
+ def load_pairs(manifest: Path) -> list[tuple]:
+@@ -72,7 +74,7 @@ def evaluate_full(model, pairs, device, out_fps=3.125, chunk_out=2048, overlap_o
+             else:
+                 mel_chunk = np.asarray(mel[a:b], dtype=np.float32)  # [T', D]
+             x = torch.from_numpy(mel_chunk)[None].to(device)
+-            with torch.autocast("cuda", dtype=torch.bfloat16):
++            with autocast_context(device):
+                 logits = model(x)[0].float().cpu().numpy()
+             m = min(len(logits), b - a)
+             probs[a: a + m] += logits_to_probs(logits[:m], classes)
+@@ -118,6 +120,7 @@ def main():
+     ap.add_argument("--manifest", required=True)
+     ap.add_argument("--val-manifest", required=True)
+     ap.add_argument("--gpu", type=int, default=0)
++    ap.add_argument("--device", default="auto", help="auto, cpu, mps, cuda, or cuda:N")
+     ap.add_argument("--batch-size", type=int, default=32)
+     ap.add_argument("--lr", type=float, default=3e-4)
+     ap.add_argument("--steps", type=int, default=12000)
+@@ -140,7 +143,8 @@ def main():
+         args.out_fps = 3.125 if args.input_type == "mel" else 1.5625
+ 
+     seed_all(args.seed)
+-    device = torch.device(f"cuda:{args.gpu}")
++    device = resolve_device(args.device, args.gpu)
++    print(f"device={device}", flush=True)
+     run_dir = Path("runs") / args.run_name
+     run_dir.mkdir(parents=True, exist_ok=True)
+     writer = SummaryWriter(str(run_dir / "tb"))
+@@ -178,7 +182,7 @@ def main():
+             if args.input_type == "emb":
+                 mel = mel.transpose(1, 2)  # [B, D, T'] -> [B, T', D]
+             model.train()
+-            with torch.autocast("cuda", dtype=torch.bfloat16):
++            with autocast_context(device):
+                 logits = model(mel)
+                 n = min(logits.shape[1], y.shape[1])
+                 yy = y[:, :n]
+diff --git a/tests/test_apple_silicon.py b/tests/test_apple_silicon.py
+new file mode 100644
+index 0000000..6861496
+--- /dev/null
++++ b/tests/test_apple_silicon.py
+@@ -0,0 +1,126 @@
++"""Synthetic compatibility checks, not singing-detection accuracy benchmarks.
++
++AUTOSLICER_CHECKPOINT=/path/to/best.pt enables released-weight parity checks.
++All accelerator tests skip on hosts without MPS. No fallback environment flag is set.
++"""
++import json
++import os
++import subprocess
++import sys
++import tempfile
++import unittest
++from pathlib import Path
++from unittest.mock import patch
++
++import numpy as np
++import torch
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT / 'src'))
++from devices import autocast_context
++from features import extract_logmel_file
++from infer import predict_probs
++from models import build_model
++
++MPS = torch.backends.mps.is_available()
++CHECKPOINT = os.environ.get('AUTOSLICER_CHECKPOINT')
++
++
++def devices():
++    return ['cpu', 'mps'] if MPS else ['cpu']
++
++
++class CompatibilityTests(unittest.TestCase):
++    def test_crnn_multiclass_forward_backward_and_optimizer(self):
++        """Exercise all default CNN/GRU layers and the four-class release head."""
++        for requested in devices():
++            with self.subTest(device=requested):
++                torch.manual_seed(42)
++                device = torch.device(requested)
++                model = build_model('crnn', n_out=4).to(device).train()
++                optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
++                before = model.head[-1].weight.detach().clone()
++                x = torch.randn(2, 80, 128).to(device)
++                y = torch.arange(16).reshape(2, 8).remainder(4).to(device)
++                with autocast_context(device):
++                    logits = model(x)
++                    loss = torch.nn.functional.cross_entropy(logits.flatten(0, 1), y.flatten())
++                self.assertEqual(tuple(logits.shape), (2, 8, 4))
++                self.assertTrue(torch.isfinite(loss).item())
++                loss.backward()
++                for name, parameter in model.named_parameters():
++                    self.assertIsNotNone(parameter.grad, name)
++                    self.assertTrue(torch.isfinite(parameter.grad).all().item(), name)
++                optimizer.step()
++                self.assertGreater((model.head[-1].weight - before).abs().max().item(), 0)
++
++    @unittest.skipUnless(MPS, 'MPS unavailable')
++    def test_mps_feature_cache_matches_cpu(self):
++        torch.manual_seed(42)
++        wav = torch.randn(16000 * 2) * 0.1
++        with patch('features.load_audio', return_value=wav):
++            cpu = extract_logmel_file('synthetic.wav', device='cpu', chunk_seconds=1)
++            mps = extract_logmel_file('synthetic.wav', device=torch.device('mps'), chunk_seconds=1)
++        self.assertEqual(cpu.dtype, np.float16)
++        self.assertEqual(cpu.shape[0], 80)
++        self.assertTrue(np.isfinite(cpu).all())
++        np.testing.assert_array_equal(cpu, mps)
++
++    def test_train_and_eval_cli(self):
++        """Two actual CLI updates, checkpoint round-trip, and probability dump."""
++        (ROOT / 'runs').mkdir(exist_ok=True)
++        with tempfile.TemporaryDirectory(prefix='compat-', dir=ROOT / 'runs') as temp:
++            scratch = Path(temp)
++            rng = np.random.default_rng(42)
++            mel_path, label_path = scratch / 'mel.npy', scratch / 'label.npy'
++            np.save(mel_path, rng.normal(size=(80, 256)).astype(np.float16))
++            np.save(label_path, np.tile(np.array([-1, 0, 1, 2, 3, 4, 0, 1], np.float32), 2))
++            manifest = scratch / 'manifest.json'
++            manifest.write_text(json.dumps([{'mel': str(mel_path), 'label': str(label_path),
++                                             'vod': 'synthetic-compatibility-only'}]))
++            for requested in devices():
++                with self.subTest(device=requested):
++                    run_dir = scratch / requested
++                    cmd = [sys.executable, str(ROOT / 'src/train.py'), '--device', requested,
++                           '--run-name', str(run_dir), '--manifest', str(manifest),
++                           '--val-manifest', str(manifest), '--steps', '2', '--val-every', '1',
++                           '--warmup', '0', '--batch-size', '2', '--window-s', '2.56',
++                           '--num-workers', '0', '--classes', '4']
++                    result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=180)
++                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++                    self.assertIn(f'device={requested}', result.stdout)
++                    ckpt = torch.load(run_dir / 'last.pt', map_location='cpu', weights_only=False)
++                    self.assertEqual(ckpt['step'], 2)
++                    self.assertTrue(all(torch.isfinite(v).all() for v in ckpt['model'].values()))
++                    self.assertEqual(len(json.loads((run_dir / 'history.json').read_text())), 2)
++                    result = subprocess.run(
++                        [sys.executable, str(ROOT / 'scripts/eval_dump.py'), '--device', requested,
++                         '--checkpoint', str(run_dir / 'last.pt'), '--val-manifest', str(manifest),
++                         '--out-dir', str(run_dir / 'val_probs')],
++                        cwd=ROOT, capture_output=True, text=True, timeout=180)
++                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++                    probs = np.load(run_dir / 'val_probs/mel.probs.npy')
++                    self.assertEqual(probs.shape, (16,))
++                    self.assertTrue(np.isfinite(probs).all())
++                    self.assertTrue(((probs >= 0) & (probs <= 1)).all())
++
++    @unittest.skipUnless(MPS and CHECKPOINT, 'set AUTOSLICER_CHECKPOINT; MPS required')
++    def test_release_checkpoint_inference_cpu_mps_parity(self):
++        ckpt = torch.load(CHECKPOINT, map_location='cpu', weights_only=False)
++        model = build_model(ckpt['args']['model'], **json.loads(ckpt['args'].get('model_kwargs', '{}')))
++        model.load_state_dict(ckpt['model'])
++        torch.manual_seed(42)
++        time = torch.arange(16000 * 8, dtype=torch.float32) / 16000
++        wav = 0.15 * torch.sin(2 * torch.pi * 440 * time) + 0.02 * torch.randn_like(time)
++        cpu = predict_probs(wav, model, torch.device('cpu'), chunk_s=4.16, overlap_s=0.32)
++        mps = predict_probs(wav, model, torch.device('mps'), chunk_s=4.16, overlap_s=0.32)
++        self.assertEqual(cpu.shape, (26,))
++        self.assertTrue(np.isfinite(cpu).all())
++        self.assertTrue(((cpu >= 0) & (cpu <= 1)).all())
++        self.assertGreater(cpu.max(), 0)
++        np.testing.assert_allclose(mps, cpu, rtol=1e-4, atol=1e-5)
++        print(f'release CPU/MPS max probability difference: {np.max(np.abs(cpu - mps)):.3g}')
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/tests/test_devices.py b/tests/test_devices.py
+new file mode 100644
+index 0000000..932149f
+--- /dev/null
++++ b/tests/test_devices.py
+@@ -0,0 +1,71 @@
++"""Device policy regressions; CUDA cases are mocked so these run on any host."""
++import sys
++import unittest
++from contextlib import nullcontext
++from pathlib import Path
++from unittest.mock import patch
++
++import torch
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
++from devices import autocast_context, feature_device, resolve_device
++
++
++class DevicePolicyTests(unittest.TestCase):
++    def test_auto_priority_and_gpu_index(self):
++        for cuda, mps, expected in [(True, True, 'cuda:1'),
++                                    (False, True, 'mps'),
++                                    (False, False, 'cpu')]:
++            with self.subTest(expected=expected), \
++                    patch('torch.cuda.is_available', return_value=cuda), \
++                    patch('torch.cuda.device_count', return_value=2), \
++                    patch('torch.backends.mps.is_available', return_value=mps):
++                self.assertEqual(str(resolve_device('auto', gpu=1)), expected)
++                self.assertEqual(str(resolve_device(None, gpu=1)), expected)
++
++    def test_explicit_cpu_works_without_accelerators(self):
++        with patch('torch.cuda.is_available', return_value=False), \
++                patch('torch.backends.mps.is_available', return_value=False):
++            self.assertEqual(resolve_device('cpu'), torch.device('cpu'))
++            self.assertEqual(resolve_device(torch.device('cpu')), torch.device('cpu'))
++            for requested in ['mps', 'cuda']:
++                with self.subTest(requested=requested), self.assertRaises(ValueError):
++                    resolve_device(requested)
++
++    def test_explicit_cuda_index_overrides_gpu_flag(self):
++        with patch('torch.cuda.is_available', return_value=True), \
++                patch('torch.cuda.device_count', return_value=2):
++            self.assertEqual(str(resolve_device('cuda', gpu=1)), 'cuda:1')
++            self.assertEqual(str(resolve_device('cuda:0', gpu=1)), 'cuda:0')
++            with self.assertRaises(ValueError):
++                resolve_device('cuda:2')
++        with self.assertRaises(ValueError):
++            resolve_device('meta')
++
++    def test_mps_frontend_uses_cpu_but_cuda_frontend_stays_on_cuda(self):
++        for requested, expected in [('cpu', 'cpu'), ('mps', 'cpu'), ('cuda:1', 'cuda:1')]:
++            self.assertEqual(str(feature_device(torch.device(requested))), expected)
++
++    def test_cpu_and_mps_do_not_enable_cuda_autocast(self):
++        with patch('torch.autocast') as autocast:
++            for device in ['cpu', 'mps']:
++                with autocast_context(torch.device(device)):
++                    pass
++            autocast.assert_not_called()
++
++    def test_cuda_bf16_requires_hardware_support(self):
++        for supported in [False, True]:
++            with self.subTest(bf16=supported), \
++                    patch('torch.cuda.device', return_value=nullcontext()), \
++                    patch('torch.cuda.is_bf16_supported', return_value=supported), \
++                    patch('torch.autocast', return_value=nullcontext()) as autocast:
++                with autocast_context(torch.device('cuda:0')):
++                    pass
++                if supported:
++                    autocast.assert_called_once_with('cuda', dtype=torch.bfloat16)
++                else:
++                    autocast.assert_not_called()
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/tests/test_ffmpeg_override.py b/tests/test_ffmpeg_override.py
+new file mode 100644
+index 0000000..e622276
+--- /dev/null
++++ b/tests/test_ffmpeg_override.py
+@@ -0,0 +1,87 @@
++"""An embedding app may provide FFmpeg without changing the user's PATH."""
++import os
++from pathlib import Path
++import struct
++import sys
++import tempfile
++from types import SimpleNamespace
++import unittest
++from unittest.mock import patch
++
++import numpy as np
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT / 'src'))
++import bilibili
++from features import load_audio
++from infer import cut_video
++
++
++class FFmpegOverrideTests(unittest.TestCase):
++    def test_audio_fallback_uses_override_or_default_executable(self):
++        for override in [None, '', '/provided tools/ffmpeg']:
++            env = dict(os.environ)
++            env.pop('AUTOSLICER_FFMPEG', None)
++            if override is not None:
++                env['AUTOSLICER_FFMPEG'] = override
++            with self.subTest(override=override), patch.dict(os.environ, env, clear=True), \
++                    patch('features.torchaudio.load', side_effect=RuntimeError('no decoder')), \
++                    patch('subprocess.run', return_value=SimpleNamespace(stdout=struct.pack('<2f', .25, -.5))) as run:
++                wav = load_audio('file with spaces.mp4')
++                np.testing.assert_array_equal(wav.numpy(), [.25, -.5])
++                self.assertEqual(run.call_args.args[0][0], override or 'ffmpeg')
++                self.assertIn('file with spaces.mp4', run.call_args.args[0])
++                self.assertTrue(run.call_args.kwargs['check'])
++
++    def test_both_clip_copy_and_reencode_use_override(self):
++        with patch.dict(os.environ, {'AUTOSLICER_FFMPEG': '/provided tools/ffmpeg'}), \
++                patch('infer.subprocess.run', side_effect=[SimpleNamespace(returncode=1),
++                                                          SimpleNamespace(returncode=0)]) as run:
++            cut_video(Path('source.mp4'), [{'cut_start': 1, 'cut_end': 2}], Path('out'), 'test')
++        self.assertEqual(run.call_count, 2)
++        for call in run.call_args_list:
++            self.assertEqual(call.args[0][0], '/provided tools/ffmpeg')
++        self.assertTrue(run.call_args.kwargs['check'])
++
++    def test_downloader_audio_remux_and_video_mux_use_override(self):
++        (ROOT / 'runs').mkdir(exist_ok=True)
++        stream = {'bandwidth': 1000, 'baseUrl': 'https://unused.invalid/stream',
++                  'id': 1, 'codecs': 'test'}
++        view = {'pages': [{'cid': 1, 'duration': 1}], 'title': 'test'}
++        def fake_download(urls, target, cookie):
++            target.touch()
++        with tempfile.TemporaryDirectory(prefix='ffmpeg-', dir=ROOT / 'runs') as temp:
++            for video in [False, True]:
++                with self.subTest(video=video), \
++                        patch.dict(os.environ, {'AUTOSLICER_FFMPEG': '/provided tools/ffmpeg'}), \
++                        patch('bilibili.resolve_input', return_value=('BVtest', 1)), \
++                        patch('bilibili.get_view', return_value=view), \
++                        patch('bilibili.get_dash', return_value={'audio': [stream], 'video': [stream]}), \
++                        patch('bilibili._download', side_effect=fake_download), \
++                        patch('bilibili.subprocess.run') as run:
++                    result = bilibili.download('unused', Path(temp), want_video=video)
++                    self.assertEqual(result.suffix, '.mp4' if video else '.m4a')
++                    self.assertEqual(run.call_args.args[0][0], '/provided tools/ffmpeg')
++                    self.assertTrue(run.call_args.kwargs['check'])
++
++    @unittest.skipUnless(os.environ.get('AUTOSLICER_FFMPEG'), 'set AUTOSLICER_FFMPEG for real decode test')
++    def test_actual_ffmpeg_decode_with_empty_path(self):
++        """Prove a bundled absolute executable works when FFmpeg is absent from PATH."""
++        import wave
++        (ROOT / 'runs').mkdir(exist_ok=True)
++        with tempfile.TemporaryDirectory(prefix='ffmpeg-', dir=ROOT / 'runs') as temp:
++            source = Path(temp) / 'synthetic.wav'
++            samples = np.tile(np.array([0, 8192, -8192, 0], dtype='<i2'), 400)
++            with wave.open(str(source), 'wb') as audio:
++                audio.setnchannels(1)
++                audio.setsampwidth(2)
++                audio.setframerate(16000)
++                audio.writeframes(samples.tobytes())
++            with patch.dict(os.environ, {'PATH': ''}), \
++                    patch('features.torchaudio.load', side_effect=RuntimeError('no decoder')):
++                wav = load_audio(source)
++            np.testing.assert_allclose(wav.numpy(), samples.astype(np.float32) / 32768, atol=1e-7)
++
++
++if __name__ == '__main__':
++    unittest.main()
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "VTuber SongCut",
+  "version": "0.1.0",
+  "identifier": "io.songcut.studio",
+  "build": {"frontendDist": "../../web/dist"},
+  "app": {"windows": [], "security": {"csp": "default-src 'self' http://127.0.0.1:8765; media-src 'self' http://127.0.0.1:8765 blob:; style-src 'self' 'unsafe-inline'"}},
+  "bundle": {"active": false}
+}
