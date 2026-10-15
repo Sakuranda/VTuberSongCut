@@ -18,7 +18,7 @@ The source export fails if a required library source tree, an installed library'
 
 Use the same native platform/toolchain recorded in the companion. Windows requires Visual Studio C++ build tools; Linux requires a C/C++ toolchain, autoconf/automake/libtool/pkg-config and NASM; macOS requires Xcode command line tools plus autoconf/automake/libtool/pkg-config and NASM. vcpkg downloads its pinned auxiliary tools when necessary.
 
-From a VTuberSongCut source checkout:
+From a VTuberSongCut source checkout, or from the extracted companion's `recipes/project` directory (which preserves the `scripts`/`packaging` layout needed by the media builder):
 
 ```sh
 git clone https://github.com/microsoft/vcpkg.git work/media/vcpkg

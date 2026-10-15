@@ -40,7 +40,7 @@ def collect_source_archives(downloads: Path, logs: list[Path]) -> list[Path]:
     """Use vcpkg's extraction messages, excluding unrelated downloaded tool binaries."""
     names = set()
     for log in logs:
-        content = log.read_text(encoding="utf-8", errors="replace")
+        content = re.sub(r"\x1b\[[0-9;]*m", "", log.read_text(encoding="utf-8", errors="replace"))
         for value in re.findall(r"Extracting source ([^\r\n]+)", content):
             value = value.strip().strip('"')
             # Logs from a restored runner may use the other OS's separators.
@@ -89,9 +89,13 @@ def export(state: Path, label: str, backend: Path, output: Path, *, check_checko
     recipes.mkdir()
     if check_checkout:
         subprocess.run(["git", "archive", "--format=tar.gz", f"--output={recipes / 'vcpkg-source.tar.gz'}", PIN], cwd=vcpkg, check=True)
-    shutil.copytree(ROOT / "packaging", recipes / "packaging")
-    shutil.copy2(ROOT / "scripts/build_release_media.py", recipes / "build_release_media.py")
-    shutil.copy2(ROOT / "scripts/export_media_sources.py", recipes / "export_media_sources.py")
+    project = recipes / "project"
+    shutil.copytree(ROOT / "packaging", project / "packaging")
+    (project / "scripts").mkdir()
+    (project / "docs").mkdir()
+    shutil.copy2(ROOT / "scripts/build_release_media.py", project / "scripts/build_release_media.py")
+    shutil.copy2(ROOT / "scripts/export_media_sources.py", project / "scripts/export_media_sources.py")
+    shutil.copy2(ROOT / "docs/MEDIA-SOURCES.md", project / "docs/MEDIA-SOURCES.md")
     shutil.copy2(ROOT / "docs/MEDIA-SOURCES.md", staging / "HOW-TO-BUILD.md")
     metadata = staging / "build-records"
     metadata.mkdir()
@@ -100,8 +104,9 @@ def export(state: Path, label: str, backend: Path, output: Path, *, check_checko
     if (state / "build-history").is_dir():
         shutil.copytree(state / "build-history", metadata / "build-history")
     shutil.copytree(state / "installed/vcpkg", metadata / "installed-vcpkg", ignore=shutil.ignore_patterns("updates"))
-    installed_share = state / "installed" / record["triplet"] / "share"
-    shutil.copytree(installed_share, metadata / "installed-share")
+    for installed_triplet in sorted((state / "installed").iterdir()):
+        if (installed_triplet / "share").is_dir():
+            shutil.copytree(installed_triplet / "share", metadata / "installed-share" / installed_triplet.name)
     inventory = {
         "vcpkg_commit": PIN, "triplet": record["triplet"], "platform": label,
         "created_utc": datetime.now(timezone.utc).isoformat(), "source_ports": sorted(trees),

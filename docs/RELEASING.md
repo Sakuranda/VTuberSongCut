@@ -28,6 +28,8 @@ cd apps/web
 npm ci
 npm run build
 cd ../..
+git clone https://github.com/microsoft/vcpkg.git work/media/vcpkg
+git -C work/media/vcpkg checkout 20ceb8adbf0504d4b0d5e4058a32f9d4fc896391
 python scripts/build_release_media.py --triplet arm64-osx-songcut
 python scripts/build_desktop_backend.py --ffmpeg work/media/installed/arm64-osx-songcut/tools/ffmpeg/ffmpeg --ffprobe work/media/installed/arm64-osx-songcut/tools/ffmpeg/ffprobe --media-build-record work/media/media-build.json
 python scripts/smoke_desktop_backend.py apps/desktop/src-tauri/binaries/songcut-backend/songcut-backend

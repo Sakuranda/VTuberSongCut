@@ -55,10 +55,12 @@ def test_source_export_contains_sources_licenses_and_exact_binary_hashes(exporte
     with tarfile.open(companion) as archive:
         names = archive.getnames()
         assert any(name.endswith("preferred-source.c") for name in names)
+        assert "MediaSources-fixture/recipes/project/scripts/build_release_media.py" in names
+        assert "MediaSources-fixture/recipes/project/packaging/vcpkg.json" in names
         assert not any(name.endswith("compiled.obj") for name in names)
         assert not any("unrelated-bootstrap-tool" in name for name in names)
         assert any(name.endswith("original-source-archives/ffmpeg-source.tar.gz") for name in names)
-        assert any(name.endswith("share/ffmpeg/copyright") for name in names)
+        assert any(name.endswith("/ffmpeg/copyright") for name in names)
         manifest = json.load(archive.extractfile("MediaSources-fixture/SOURCE-AND-BINARY-MANIFEST.json"))
         assert manifest["binaries"]["ffmpeg"]["frozen_sha256"] == exporter.digest(backend / "_internal/resources/bin/ffmpeg")
 
