@@ -183,9 +183,18 @@ jobs:
           fi
       - name: Build platform installer
         working-directory: apps/desktop
+        shell: bash
         env:
           NO_STRIP: 'true'
-        run: npm ci && npm run build -- --verbose --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
+        run: |
+          npm ci
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            # linuxdeploy scans nested PyInstaller ELF files outside their normal
+            # bootloader context. Expose the bundled private library directories.
+            bundled_libraries=$(python -c 'from pathlib import Path; print(":".join(sorted({str(p.parent.resolve()) for p in Path("src-tauri/binaries/songcut-backend/_internal").rglob("*.so*") if p.is_file()})))')
+            export LD_LIBRARY_PATH="$bundled_libraries${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          fi
+          npm run build -- --verbose --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
       - name: Verify installed macOS DMG contents
         if: runner.os == 'macOS'
         run: python scripts/smoke_macos_installer.py apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle --report release-assets/macOS-installer-smoke.json

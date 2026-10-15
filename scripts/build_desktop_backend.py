@@ -141,6 +141,13 @@ def main():
     else:
         command += ["--collect-data", "imageio_ffmpeg"]
     subprocess.run(command, cwd=ROOT, check=True)
+    if sys.platform == "linux":
+        # The wheel's optional SoX extension requires an external libsox that is
+        # absent from this runtime. The app uses the verified soundfile/media
+        # paths; leaving this unused extension would break ELF dependency scans.
+        for pattern in ("_torchaudio_sox*.so", "libtorchaudio_sox.so"):
+            for binary in list((destination / "songcut-backend").rglob(pattern)):
+                binary.unlink()
     if args.ffmpeg:
         extras = [p for p in (destination / "songcut-backend").rglob("*") if p.is_file() and "imageio_ffmpeg" in p.parts and p.name.startswith("ffmpeg-")]
         if extras:
