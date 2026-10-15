@@ -51,6 +51,33 @@
 | Windows · x64 | [下载 EXE](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber.SongCut_0.1.0_x64-setup.exe) |
 | Linux · x64 | [下载 AppImage](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber.SongCut_0.1.0_amd64.AppImage) / [下载 DEB](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber.SongCut_0.1.0_amd64.deb) |
 
+当前预览版尚未完成 Apple 公证或 Windows 发行者签名，首次打开可能出现系统提示。以下操作仅用于从**本仓库 Releases** 下载、并已核对对应 `SHA256SUMS` 的安装包。
+
+#### macOS 首次安装
+
+1. 打开 DMG，把 **VTuber SongCut.app** 拖入“应用程序”（Applications）文件夹，再打开应用。
+2. 如果提示“无法验证开发者”或“Apple 无法检查是否包含恶意软件”，到 **系统设置 → 隐私与安全性 → 仍要打开**，按提示确认。参见 [Apple 官方说明](https://support.apple.com/zh-cn/102445)。
+
+也可以在确认安装包来源后，打开“终端”，执行这一行，再重新打开拾歌：
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/VTuber SongCut.app"
+```
+
+这条命令只移除**拾歌应用及其内部文件**的下载隔离标记，不会为应用签名或公证。如果安装在其他位置，请替换引号内的路径；遇到权限不足可使用上面的系统设置方式。
+
+#### Windows 首次安装
+
+1. 双击下载的 `.exe` 安装程序。
+2. 如果出现 SmartScreen 的“Windows 已保护你的电脑”，点击 **更多信息 → 仍要运行**，再按安装向导完成安装。参见 [Microsoft 官方说明](https://github.com/MicrosoftDocs/windows-dev-docs/blob/docs/hub/apps/package-and-deploy/smartscreen-reputation.md)。
+3. 如果安装器提示缺少 **Microsoft Edge WebView2 Runtime**，保持联网并按提示完成安装。
+
+如果没有“仍要运行”，或提示由“智能应用控制”（Smart App Control）或组织策略阻止，上述 SmartScreen 步骤不适用；请联系设备管理员，或使用[服务器版](#自托管服务器)通过浏览器访问。Smart App Control 与 SmartScreen 的区别见 [Microsoft 常见问题](https://support.microsoft.com/en-us/windows/security/threat-malware-protection/smart-app-control-frequently-asked-questions)。
+
+> 遇到明确的恶意软件告警，或下载文件的校验值不一致时，请停止安装并反馈问题。无需全局关闭 Gatekeeper、SmartScreen 或杀毒软件。
+
+#### 开始使用
+
 安装后打开拾歌，导入录播，在左侧选择主播模型即可开始。第一次使用时，可到**模型训练**工作区训练自己的模型，或导入已有兼容模型。安装包不附带主播模型权重；详见[模型使用说明](docs/MODELS.md)。
 
 桌面发行包由 GitHub Actions 构建。发行版本、校验文件及签名状态以对应 Release 说明为准。

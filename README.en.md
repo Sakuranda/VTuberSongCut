@@ -51,6 +51,33 @@ Visit **[Releases](https://github.com/Sakuranda/VTuberSongCut/releases)** and do
 | Windows · x64 | [Download EXE](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber.SongCut_0.1.0_x64-setup.exe) |
 | Linux · x64 | [Download AppImage](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber.SongCut_0.1.0_amd64.AppImage) / [Download DEB](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber.SongCut_0.1.0_amd64.deb) |
 
+This preview is not Apple-notarized or Windows publisher-signed, so the first launch may show a system warning. Use the steps below only for installers downloaded from **this repository's Releases** and checked against the corresponding `SHA256SUMS` file.
+
+#### First installation on macOS
+
+1. Open the DMG, drag **VTuber SongCut.app** into **Applications**, then open the app.
+2. For an unidentified-developer or Apple-cannot-check warning, go to **System Settings → Privacy & Security → Open Anyway** and confirm. See [Apple's instructions](https://support.apple.com/en-gb/102445).
+
+Alternatively, after verifying the download's source, open Terminal, run this single command, and open SongCut again:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/VTuber SongCut.app"
+```
+
+This removes the download quarantine attribute only from **SongCut and its bundled files**; it does not sign or notarize the app. Replace the quoted path if you installed elsewhere. If permissions prevent the command, use the System Settings method above.
+
+#### First installation on Windows
+
+1. Double-click the downloaded `.exe` installer.
+2. If SmartScreen displays **Windows protected your PC**, select **More info → Run anyway**, then follow the installer. See [Microsoft's documentation](https://github.com/MicrosoftDocs/windows-dev-docs/blob/docs/hub/apps/package-and-deploy/smartscreen-reputation.md).
+3. If prompted to install **Microsoft Edge WebView2 Runtime**, stay online and complete that step.
+
+If **Run anyway** is unavailable, or **Smart App Control** or organization policy blocks the app, the SmartScreen steps above do not apply. Contact your device administrator or access a [self-hosted server](#self-hosted-server) through your browser. See [Microsoft's Smart App Control FAQ](https://support.microsoft.com/en-us/windows/security/threat-malware-protection/smart-app-control-frequently-asked-questions).
+
+> Stop and report the issue if there is an explicit malware detection or a checksum mismatch. These steps do not require globally disabling Gatekeeper, SmartScreen, or antivirus protection.
+
+#### Start using SongCut
+
 Install the app, import a recording, and select the performer's model. On first use, open **Model Training** to train your own detector or import a compatible model. Performer weights are not included in the installers; see the [model guide](docs/MODELS.md).
 
 Desktop packages are built by GitHub Actions. Check the corresponding release notes for available versions, checksums, and signing status.
