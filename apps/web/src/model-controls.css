@@ -204,3 +204,11 @@
     left: -90px;
   }
 }
+
+/* Interactive help must be able to extend beyond the narrow clip library. */
+.library.panel {
+  overflow: visible;
+}
+.library.panel > .panel-heading {
+  border-radius: 14px 14px 0 0;
+}
