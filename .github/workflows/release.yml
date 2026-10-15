@@ -117,8 +117,6 @@ jobs:
         with:
           path: |
             work/media/installed
-            work/media/media-build.json
-            work/media/build-command.json
             work/media/vcpkg/buildtrees
             work/media/build-history
             work/media/source-archives
@@ -151,8 +149,6 @@ jobs:
         with:
           path: |
             work/media/installed
-            work/media/media-build.json
-            work/media/build-command.json
             work/media/vcpkg/buildtrees
             work/media/build-history
             work/media/source-archives

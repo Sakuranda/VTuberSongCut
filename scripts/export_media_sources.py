@@ -122,6 +122,13 @@ def prepare_cache(state: Path, *, check_checkout=True):
             raise ValueError(f"Installed {name} does not match its controlled build record")
     capture_port_logs(state)
     prune_build_outputs(state)
+    # Keep the cache path list stable: GitHub includes that list in its hidden
+    # cache version, so adding top-level records would invalidate existing builds.
+    history = state / "build-history"
+    history.mkdir(exist_ok=True)
+    for name in ("media-build.json", "build-command.json"):
+        if (state / name).is_file():
+            shutil.copy2(state / name, history / f"cached-{name}")
     print("Matched controlled media, patched/original sources and logs are ready for early caching")
 
 

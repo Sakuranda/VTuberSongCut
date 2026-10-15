@@ -236,6 +236,8 @@ def test_exact_verified_media_cache_avoids_compiler_and_still_requires_sources(e
     monkeypatch.setattr(builder.subprocess, "run", no_build)
     monkeypatch.setattr(builder.subprocess, "Popen", no_build)
     monkeypatch.setattr(builder.subprocess, "check_output", inspect)
+    exporter.prepare_cache(state, check_checkout=False)
+    (state / "media-build.json").unlink()
     builder.main()
     record = json.loads((state / "build-command.json").read_text())
     assert record["reused_verified_cache"] is True and record["executed"] is False

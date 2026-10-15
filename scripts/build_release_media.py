@@ -43,8 +43,11 @@ def main():
     cached_record = None
     history = state / "build-history"
     history.mkdir(exist_ok=True)
-    if args.reuse_verified_cache and (state / "media-build.json").is_file():
-        cached_record = json.loads((state / "media-build.json").read_text(encoding="utf-8"))
+    saved_record = state / "media-build.json"
+    if not saved_record.is_file():
+        saved_record = history / "cached-media-build.json"
+    if args.reuse_verified_cache and saved_record.is_file():
+        cached_record = json.loads(saved_record.read_text(encoding="utf-8"))
         if cached_record["vcpkg_commit"] != PIN or cached_record["triplet"] != args.triplet:
             raise SystemExit("Cached media record does not match the requested pin/triplet")
     for name in ("media-build.json", "build-command.json"):
