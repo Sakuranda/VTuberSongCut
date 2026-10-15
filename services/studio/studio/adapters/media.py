@@ -4,6 +4,10 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
+from threading import Event, Timer
+import time
+from typing import Callable
 from ..domain import Project, Clip
 from .lyrics import render_ass
 
@@ -21,15 +25,26 @@ class FFmpegMedia:
             raise RuntimeError("媒体处理失败：" + result.stderr[-1500:])
 
     def probe(self, source: Path) -> tuple[int, bool]:
-        result = subprocess.run([self.ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(source)],
-                                capture_output=True, text=True, check=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-        data = json.loads(result.stdout)
-        if not any(s["codec_type"] == "audio" for s in data["streams"]):
+        try:
+            result = subprocess.run([self.ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(source)],
+                                    capture_output=True, text=True, check=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        except subprocess.CalledProcessError as exc:
+            raise ValueError("无法读取媒体文件，请检查素材是否损坏或格式是否受支持：" + (exc.stderr or "")[-500:]) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError("检查媒体超时，请确认素材文件可读取后重试") from exc
+        except OSError as exc:
+            raise ValueError("无法启动媒体检查工具 ffprobe，请确认媒体工具可用：" + str(exc)) from exc
+        try:
+            data = json.loads(result.stdout)
+            duration_ms = round(float(data["format"]["duration"])*1000)
+            streams = data["streams"]
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("无法读取媒体时长，请检查素材是否完整") from exc
+        if not any(s.get("codec_type") == "audio" for s in streams):
             raise ValueError("录播需要包含音轨")
-        duration_ms = round(float(data["format"]["duration"])*1000)
         if duration_ms <= 0:
             raise ValueError("无法读取媒体时长")
-        return duration_ms, any(s["codec_type"] == "video" for s in data["streams"])
+        return duration_ms, any(s.get("codec_type") == "video" for s in streams)
 
     def source_fps(self, source: Path) -> float | None:
         from fractions import Fraction
@@ -50,9 +65,66 @@ class FFmpegMedia:
             subtitle = " ass " in result.stdout or " subtitles " in result.stdout
         return {"ffmpeg": available, "ffprobe": bool(shutil.which(self.ffprobe)), "subtitle_burn": subtitle}
 
-    def preview(self, source: Path, output: Path):
-        self.run(["-i", str(source), "-map", "0:v:0", "-map", "0:a:0", "-vf", "scale=1280:720:force_original_aspect_ratio=decrease:force_divisible_by=2",
-                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", str(output)])
+    def preview(self, source: Path, output: Path, *, duration_ms: int | None = None,
+                on_progress: Callable[[float], None] | None = None):
+        arguments = ["-i", str(source), "-map", "0:v:0", "-map", "0:a:0", "-vf", "scale=1280:720:force_original_aspect_ratio=decrease:force_divisible_by=2",
+                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", str(output)]
+        if on_progress is None:
+            return self.run(arguments)
+        if duration_ms is None:
+            duration_ms, _ = self.probe(source)
+        if duration_ms <= 0:
+            raise ValueError("无法读取媒体时长")
+        self._run_preview(arguments, duration_ms, on_progress)
+
+    def _run_preview(self, arguments, duration_ms, on_progress, timeout=6*3600):
+        command = [self.ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                   "-nostats", "-stats_period", "0.25", "-progress", "pipe:1", *arguments]
+        # stderr must be drained independently from machine-readable stdout.
+        # A temporary file also prevents large decoder error logs filling a pipe.
+        with tempfile.TemporaryFile() as errors:
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors,
+                                       text=True, encoding="utf-8", errors="replace",
+                                       creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            expired = Event()
+            def expire():
+                expired.set()
+                if process.poll() is None:
+                    process.kill()
+            timer = Timer(timeout, expire)
+            timer.daemon = True
+            timer.start()
+            last_report, last_progress, latest_progress = float("-inf"), -1., 0.
+            try:
+                for line in process.stdout:
+                    key, separator, value = line.strip().partition("=")
+                    if separator and key == "progress" and value == "end" and latest_progress > last_progress:
+                        on_progress(latest_progress)
+                        last_progress = latest_progress
+                    if not separator or key != "out_time_us":
+                        continue
+                    try:
+                        progress = min(.99, max(0., int(value) / (duration_ms * 1000)))
+                    except ValueError:
+                        continue
+                    latest_progress = max(latest_progress, progress)
+                    now = time.monotonic()
+                    if progress > last_progress and (now - last_report >= .5 or progress == .99):
+                        on_progress(progress)
+                        last_report, last_progress = now, progress
+                code = process.wait()
+                if expired.is_set():
+                    raise TimeoutError("生成兼容预览超时，请检查素材后重试")
+                if code:
+                    errors.seek(0, os.SEEK_END)
+                    errors.seek(max(0, errors.tell() - 6000))
+                    raise RuntimeError("生成兼容预览失败：" + errors.read().decode("utf-8", errors="replace")[-1500:])
+            finally:
+                timer.cancel()
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                process.stdout.close()
 
     def render(self, project: Project, clip: Clip, output: Path) -> list[Path]:
         output.mkdir(parents=True, exist_ok=True)

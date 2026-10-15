@@ -64,10 +64,17 @@ class Store:
             raise KeyError(ident)
         return Job.model_validate_json(row[0])
 
-    def jobs(self, limit: int | None = 100) -> list[Job]:
+    def jobs(self, limit: int | None = 100, project_id: str | None = None) -> list[Job]:
         with self.connect() as db:
-            query = "SELECT data FROM jobs ORDER BY rowid DESC"
-            rows = db.execute(query if limit is None else query + " LIMIT ?", () if limit is None else (limit,))
+            query, parameters = "SELECT data FROM jobs", []
+            if project_id is not None:
+                query += " WHERE json_extract(data, '$.project_id')=?"
+                parameters.append(project_id)
+            query += " ORDER BY rowid DESC"
+            if limit is not None:
+                query += " LIMIT ?"
+                parameters.append(limit)
+            rows = db.execute(query, parameters)
             return [Job.model_validate_json(row[0]) for row in rows]
 
     def recover(self):

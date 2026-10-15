@@ -24,6 +24,10 @@ from .model_library import ModelLibrary, ModelInfo, MAX_MODEL_BYTES, checksum
 from .training import TrainingService, normalize_settings
 
 
+MEDIA_SUFFIXES = {".mp4", ".flv", ".mkv", ".mov", ".webm", ".avi", ".ts", ".m4v",
+                  ".wav", ".mp3", ".m4a", ".flac", ".aac", ".ogg", ".opus"}
+
+
 class SaveProject(Record):
     revision: int
     clips: list[Clip]
@@ -137,8 +141,8 @@ def create_app(settings: Settings | None = None):
     @app.post("/api/projects/upload", status_code=201)
     def upload(file: UploadFile = File(...)) -> Project:
         suffix = Path(file.filename or "").suffix.lower()
-        if suffix not in {".mp4", ".flv", ".mkv", ".mov", ".webm", ".wav", ".mp3", ".m4a"}:
-            raise HTTPException(415, "请选择 MP4、FLV、MKV、MOV、WebM 或常见音频文件")
+        if suffix not in MEDIA_SUFFIXES:
+            raise HTTPException(415, "请选择 MP4、FLV、MKV、MOV、WebM、AVI、TS、M4V 或常见音频文件")
         folder = config.data / "media" / uuid4().hex
         folder.mkdir(parents=True)
         source = folder / ("source" + suffix)
@@ -204,8 +208,8 @@ def create_app(settings: Settings | None = None):
         return FileResponse(project.preview_file or project.source_file)
 
     @app.get("/api/jobs")
-    def jobs() -> list[Job]:
-        return store.jobs()
+    def jobs(project_id: str | None = None) -> list[Job]:
+        return store.jobs(project_id=project_id)
 
     @app.get("/api/artifacts/{job_id}/{filename}")
     def artifact(job_id: str, filename: str):
@@ -245,24 +249,29 @@ def create_app(settings: Settings | None = None):
         info, path = library.resolve(model_id)
         return FileResponse(path, filename="voice-model.pt", media_type="application/octet-stream")
 
+    def dataset_view(dataset):
+        for sample in dataset["samples"]:
+            sample["preview_available"] = (config.data / "training/previews" / (sample["id"] + ".mp4")).is_file()
+        return dataset
+
     @app.get("/api/training/datasets")
     def datasets():
-        return training.datasets()
+        return [dataset_view(dataset) for dataset in training.datasets()]
 
     @app.post("/api/training/datasets", status_code=201)
     def create_dataset(body: CreateDataset):
-        return training.create_dataset(body.name, body.target_name)
+        return dataset_view(training.create_dataset(body.name, body.target_name))
 
     @app.get("/api/training/datasets/{dataset_id}")
     def dataset(dataset_id: str):
-        return training.get_dataset(dataset_id)
+        return dataset_view(training.get_dataset(dataset_id))
 
     @app.post("/api/training/datasets/{dataset_id}/samples", status_code=201)
     def add_sample(dataset_id: str, revision: int = Form(...), file: UploadFile = File(...)):
         training.get_dataset(dataset_id)
         suffix = Path(file.filename or "").suffix.lower()
-        if suffix not in {".mp4", ".flv", ".mkv", ".mov", ".webm", ".wav", ".mp3", ".m4a"}:
-            raise HTTPException(415, "请选择视频或常见音频素材")
+        if suffix not in MEDIA_SUFFIXES:
+            raise HTTPException(415, "请选择 MP4、FLV、MKV、MOV、WebM、AVI、TS、M4V 或常见音频素材")
         folder = config.data / "training/uploads" / uuid4().hex
         folder.mkdir(parents=True)
         path = folder / ("source" + suffix)
@@ -270,8 +279,8 @@ def create_app(settings: Settings | None = None):
             with path.open("wb") as output:
                 shutil.copyfileobj(file.file, output, length=1024*1024)
             duration, _ = media.probe(path)
-            return training.add_sample(dataset_id, path, Path(file.filename).name, duration,
-                                       checksum(path), expected_revision=revision)
+            return dataset_view(training.add_sample(dataset_id, path, Path(file.filename).name, duration,
+                                                   checksum(path), expected_revision=revision))
         except Exception:
             shutil.rmtree(folder)
             raise
@@ -280,11 +289,11 @@ def create_app(settings: Settings | None = None):
 
     @app.put("/api/training/datasets/{dataset_id}/samples/{sample_id}")
     def update_sample(dataset_id: str, sample_id: str, body: UpdateSample):
-        return training.update_sample(dataset_id, sample_id, body.model_dump(exclude={"revision"}), body.revision)
+        return dataset_view(training.update_sample(dataset_id, sample_id, body.model_dump(exclude={"revision"}), body.revision))
 
     @app.delete("/api/training/datasets/{dataset_id}/samples/{sample_id}")
     def remove_sample(dataset_id: str, sample_id: str, body: DatasetRevision):
-        return training.remove_sample(dataset_id, sample_id, body.revision)
+        return dataset_view(training.remove_sample(dataset_id, sample_id, body.revision))
 
     @app.get("/api/training/datasets/{dataset_id}/samples/{sample_id}/media")
     def training_media(dataset_id: str, sample_id: str):
@@ -299,17 +308,29 @@ def create_app(settings: Settings | None = None):
         sample = next((s for s in training.get_dataset(dataset_id)["samples"] if s["id"] == sample_id), None)
         if not sample:
             raise KeyError(sample_id)
+        project_id = "training-media:" + sample_id
+        preview = config.data / "training/previews" / (sample_id + ".mp4")
+        if preview.is_file():
+            previous = next((job for job in store.jobs(project_id=project_id)
+                             if job.kind == "training_preview" and job.status == "succeeded"), None)
+            if previous:
+                return previous
+            completed = Job(project_id=project_id, kind="training_preview", status="succeeded", message="兼容预览已存在")
+            store.save_job(completed)
+            return completed
         def operation(job_id):
             directory = config.data / "training/previews"
             directory.mkdir(parents=True, exist_ok=True)
-            temporary = directory / (sample_id + ".pending.mp4")
+            temporary = directory / (sample_id + "." + job_id + ".pending.mp4")
             try:
-                media.preview(Path(sample["path"]), temporary)
-                temporary.replace(directory / (sample_id + ".mp4"))
+                runner.update_progress(job_id, 0, "正在生成兼容预览")
+                media.preview(Path(sample["path"]), temporary, duration_ms=sample["duration_ms"],
+                              on_progress=lambda value: runner.update_progress(job_id, value))
+                temporary.replace(preview)
             finally:
                 temporary.unlink(missing_ok=True)
             return []
-        return runner.submit("training-media:" + sample_id, "training_preview", operation)
+        return runner.submit(project_id, "training_preview", operation)
 
     @app.post("/api/training/datasets/{dataset_id}/train", status_code=202)
     def start_training(dataset_id: str, body: StartTraining):

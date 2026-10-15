@@ -8,6 +8,7 @@ import type {
 } from "./api";
 import { formatTimecode as format } from "./editing";
 import { TimecodeInput } from "./TimecodeInput";
+import { OperationProgress } from "./OperationProgress";
 
 export function TrainingAnnotation({
   active,
@@ -30,38 +31,82 @@ export function TrainingAnnotation({
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
   const [mediaError, setMediaError] = useState(false);
+  const [mediaReady, setMediaReady] = useState(false);
+  const [networkError, setNetworkError] = useState(false);
   const [preview, setPreview] = useState<Job | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
-  const [version, setVersion] = useState(0);
+  const [previewRestored, setPreviewRestored] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [pollError, setPollError] = useState("");
+  const [version, setVersion] = useState("");
   const dragStart = useRef<number | null>(null);
   useEffect(() => {
     if (!active) video.current?.pause();
   }, [active]);
   useEffect(() => {
-    if (!preview || !["queued", "running"].includes(preview.status)) return;
     let stopped = false;
-    const timer = window.setInterval(async () => {
+    let timer: number | undefined;
+    async function poll() {
+      let retry = false;
       try {
-        const jobs = await api.jobs();
-        const current = jobs.find((job) => job.id === preview.id);
-        if (!current || stopped) return;
-        setPreview(current);
-        if (current.status === "succeeded") {
-          setVersion(Date.now());
-          setMediaError(false);
+        const jobs = await api.jobs(`training-media:${sample.id}`);
+        if (stopped) return;
+        const current = jobs.find(
+          (job) =>
+            job.project_id === `training-media:${sample.id}` &&
+            job.kind === "training_preview",
+        );
+        setPollError("");
+        if (current) {
+          setPreview(current);
+          retry = ["queued", "running"].includes(current.status);
+          if (current.status === "succeeded") {
+            setVersion(current.id);
+            setMediaError(false);
+            setNetworkError(false);
+          }
         }
       } catch {
-        /* Poll again without discarding local annotations. */
+        if (!stopped)
+          setPollError(
+            "暂时无法读取预览进度，正在重试。后台任务不会因此停止，请勿重复提交。",
+          );
+        retry = true;
+      } finally {
+        if (!stopped) {
+          setPreviewRestored(true);
+          if (retry) timer = window.setTimeout(poll, 2000);
+        }
       }
-    }, 2000);
+    }
+    void poll();
     return () => {
       stopped = true;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
-  }, [preview?.id, preview?.status]);
+  }, [dataset.id, sample.id, preview?.id]);
   const waitingPreview =
     previewBusy ||
     (!!preview && ["queued", "running"].includes(preview.status));
+  const hasPreview =
+    sample.preview_available || preview?.status === "succeeded";
+  const flv = /\.flv$/i.test(sample.name);
+  const showCompatibility = mediaError || (flv && !hasPreview && !mediaReady);
+  const previewFailed =
+    preview?.status === "failed" || preview?.status === "interrupted";
+  async function generatePreview() {
+    setPreviewBusy(true);
+    setPreviewError("");
+    try {
+      setPreview(await api.trainingPreview(dataset.id, sample.id));
+    } catch (e) {
+      setPreviewError(
+        e instanceof Error ? e.message : "无法生成预览，请重试。",
+      );
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
   function seek(ms: number) {
     const next = Math.max(0, Math.min(sample.duration_ms, Math.round(ms)));
     setNow(next);
@@ -109,43 +154,97 @@ export function TrainingAnnotation({
           onTimeUpdate={(event) =>
             setNow(Math.round(event.currentTarget.currentTime * 1000))
           }
-          onError={() => setMediaError(true)}
-          onLoadedData={() => setMediaError(false)}
+          onError={(event) => {
+            setMediaError(true);
+            setMediaReady(false);
+            setNetworkError(event.currentTarget.error?.code === 2);
+          }}
+          onLoadedData={() => {
+            setMediaError(false);
+            setNetworkError(false);
+            setMediaReady(true);
+          }}
         />
-        {mediaError && (
+        {showCompatibility && (
           <div className="training-media-error">
-            <strong>浏览器无法直接播放此录播</strong>
-            <p>生成兼容预览后继续标注，训练仍使用原始素材。</p>
+            <strong>
+              {networkError
+                ? "视频读取中断"
+                : flv
+                  ? "FLV 需要兼容预览来播放与标注"
+                  : "当前浏览器无法直接播放此录播"}
+            </strong>
+            <p>
+              {networkError
+                ? "请检查服务连接后重新加载视频。"
+                : "生成可播放的预览副本后继续标注，训练仍读取原始素材。"}
+            </p>
             <button
-              className="button"
-              disabled={waitingPreview}
-              onClick={async () => {
-                setPreviewBusy(true);
-                setError("");
-                try {
-                  setPreview(await api.trainingPreview(dataset.id, sample.id));
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : "无法生成预览");
-                } finally {
-                  setPreviewBusy(false);
-                }
-              }}
+              className="button primary preview-action"
+              disabled={disabled || waitingPreview || !previewRestored}
+              onClick={() =>
+                networkError ? video.current?.load() : void generatePreview()
+              }
             >
-              {waitingPreview ? "正在生成预览…" : "生成兼容预览"}
+              {waitingPreview
+                ? "正在生成预览…"
+                : !previewRestored
+                  ? "正在检查预览状态…"
+                  : networkError
+                    ? "重新加载视频"
+                    : previewFailed
+                      ? "重新生成兼容预览"
+                      : "生成兼容预览"}
             </button>
           </div>
         )}
       </div>
-      {preview && (
-        <p
-          className={
-            preview.status === "failed" || preview.status === "interrupted"
-              ? "model-warning"
-              : "training-hint"
+      <p className="training-hint preview-explanation">
+        {hasPreview
+          ? "正在使用兼容预览，训练仍使用原始素材。"
+          : flv
+            ? "FLV 可直接用于训练；页面播放与标注通常需要兼容预览。预览只需生成一次。"
+            : "能直接播放时无需转换；无法播放时再生成兼容预览。"}
+      </p>
+      {(preview || previewBusy) && (
+        <OperationProgress
+          title={
+            previewBusy
+              ? "正在提交预览任务"
+              : preview?.status === "queued"
+                ? "预览任务等待中"
+                : preview?.status === "succeeded"
+                  ? "兼容预览已生成"
+                  : previewFailed
+                    ? "兼容预览未完成"
+                    : "正在生成兼容预览"
           }
-          role="status"
-        >
-          {preview.message}
+          percent={
+            previewBusy
+              ? null
+              : preview?.status === "succeeded"
+                ? 100
+                : typeof preview?.progress === "number"
+                  ? Math.min(
+                      99,
+                      Math.floor(Math.max(0, preview.progress) * 100),
+                    )
+                  : null
+          }
+          failed={previewFailed}
+          detail={
+            previewBusy ? "正在连接服务…" : preview?.message || "正在准备预览…"
+          }
+        />
+      )}
+      {previewError && (
+        <p className="training-inline-error" role="alert">
+          {previewError}
+        </p>
+      )}
+      {pollError && (
+        <p className="training-inline-error" role="status">
+          {pollError}
         </p>
       )}
       <div className="annotation-heading">

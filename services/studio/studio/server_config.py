@@ -52,7 +52,7 @@ class ServerConfig:
     def allowed_origins(self):
         if self.enabled:
             return {self.origin}
-        return {"http://127.0.0.1:8765", "http://localhost:8765",
+        return {f"http://127.0.0.1:{self.port}", f"http://localhost:{self.port}",
                 "http://127.0.0.1:5173", "http://localhost:5173"}
 
     def authenticate(self, authorization: str):

@@ -8,8 +8,10 @@ import type {
   TrainingJob,
   TrainingSample,
   TrainingSettings,
+  UploadProgress,
 } from "./api";
 import { TrainingAnnotation } from "./TrainingAnnotation";
+import { OperationProgress } from "./OperationProgress";
 
 const defaults: TrainingSettings = {
   device: "auto",
@@ -108,6 +110,14 @@ export function TrainingWorkspace({
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [pollError, setPollError] = useState("");
+  const [uploadState, setUploadState] = useState<
+    | (Omit<UploadProgress, "phase"> & {
+        phase: UploadProgress["phase"] | "succeeded" | "failed";
+        filename: string;
+        error?: string;
+      })
+    | null
+  >(null);
   const upload = useRef<HTMLInputElement>(null);
   const loaded = useRef(false);
   const knownModels = useRef(new Set<string>());
@@ -130,7 +140,7 @@ export function TrainingWorkspace({
     JSON.stringify(sample) !==
       JSON.stringify(dataset?.samples.find((item) => item.id === sample.id));
   const dirtyRef = useRef(dirty);
-  dirtyRef.current = dirty;
+  dirtyRef.current = dirty || busy === "导入训练录播";
   const currentJobs = jobs.filter((job) => job.dataset_id === dataset?.id);
   const running = jobs.some((job) =>
     ["queued", "running"].includes(job.status),
@@ -157,6 +167,7 @@ export function TrainingWorkspace({
     settings.warmup >= 0 &&
     settings.warmup <= 10000;
   function accept(next: TrainingDataset, selectedId = sample?.id) {
+    if (dataset?.id !== next.id) setUploadState(null);
     setDataset(next);
     setDatasets((items) => [
       next,
@@ -262,12 +273,35 @@ export function TrainingWorkspace({
   }
   async function importSample(file?: File) {
     if (!file || !dataset || dirty) return;
-    await operation("导入训练录播", async () => {
-      const result = await api.uploadTrainingSample(dataset, file);
-      accept(result, result.samples.at(-1)?.id);
-      setNotice("录播已导入，请完整复核后再确认标注。新素材默认为训练用途。");
+    setBusy("导入训练录播");
+    setError("");
+    setNotice("");
+    setUploadState({
+      phase: "uploading",
+      filename: file.name,
+      loaded: 0,
+      total: file.size,
     });
-    if (upload.current) upload.current.value = "";
+    try {
+      const result = await api.uploadTrainingSample(dataset, file, (progress) =>
+        setUploadState({ ...progress, filename: file.name }),
+      );
+      accept(result, result.samples.at(-1)?.id);
+      setUploadState({
+        phase: "succeeded",
+        filename: file.name,
+        loaded: file.size,
+        total: file.size,
+      });
+    } catch (err) {
+      setUploadState(
+        (state) =>
+          state && { ...state, phase: "failed", error: messageOf(err) },
+      );
+    } finally {
+      setBusy("");
+      if (upload.current) upload.current.value = "";
+    }
   }
   return (
     <section
@@ -319,22 +353,24 @@ export function TrainingWorkspace({
       )}
       <div className="training-flow" aria-label="训练流程">
         <span>
-          <b>1</b> 创建主播项目
+          <b>1</b> 创建项目与导入录播
         </span>
         <span>
-          <b>2</b> 上传不同录播
+          <b>2</b> 预览、标注并复核
         </span>
         <span>
-          <b>3</b> 标注并完整复核
-        </span>
-        <span>
-          <b>4</b> 训练后去切歌
+          <b>3</b> 训练后去切歌
         </span>
       </div>
       <div className="training-grid">
-        <aside className="panel training-library">
+        <section
+          className="panel training-library"
+          aria-label="创建项目与导入录播"
+        >
           <div className="panel-heading">
-            <h3>训练项目</h3>
+            <h3>
+              <span className="training-step">1</span> 创建项目与导入录播
+            </h3>
             <button
               className="text-action"
               disabled={!!busy}
@@ -410,11 +446,11 @@ export function TrainingWorkspace({
                   <span className="count">{dataset.samples.length}</span>
                 </h3>
                 <button
-                  className="button"
+                  className="button primary"
                   disabled={!!busy || dirty}
                   onClick={() => upload.current?.click()}
                 >
-                  上传录播
+                  {busy === "导入训练录播" ? "正在导入…" : "上传录播"}
                 </button>
               </div>
               <input
@@ -428,6 +464,57 @@ export function TrainingWorkspace({
                 准备至少两份不同场次的录播，一份用于学习，另一份用于验证。
                 {dirty && "保存当前标注后可继续上传。"}
               </p>
+              {uploadState && (
+                <div className="training-upload-status">
+                  <div
+                    className="training-upload-filename"
+                    title={uploadState.filename}
+                  >
+                    {uploadState.filename}
+                  </div>
+                  <OperationProgress
+                    title={
+                      {
+                        uploading: "正在上传文件",
+                        processing: "上传完成，正在检查素材",
+                        succeeded: "素材已导入",
+                        failed: "导入失败",
+                      }[uploadState.phase]
+                    }
+                    percent={
+                      uploadState.phase === "processing" ||
+                      uploadState.phase === "succeeded"
+                        ? 100
+                        : uploadState.total
+                          ? Math.min(
+                              100,
+                              Math.floor(
+                                (uploadState.loaded / uploadState.total) * 100,
+                              ),
+                            )
+                          : null
+                    }
+                    failed={uploadState.phase === "failed"}
+                    detail={
+                      uploadState.error ||
+                      (uploadState.phase === "processing"
+                        ? "文件已发送 100%，正在读取时长并校验内容，请等待导入完成。"
+                        : uploadState.phase === "succeeded"
+                          ? "已加入下方素材列表，请继续预览与标注。"
+                          : `${(uploadState.loaded / 1024 / 1024).toFixed(1)} MB${uploadState.total ? ` / ${(uploadState.total / 1024 / 1024).toFixed(1)} MB` : ""} · 上传期间请保持页面打开。`)
+                    }
+                  />
+                  {uploadState.phase === "failed" && (
+                    <button
+                      className="button"
+                      onClick={() => upload.current?.click()}
+                      disabled={!!busy || dirty}
+                    >
+                      重新选择文件
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="training-samples">
                 {dataset.samples.map((item) => (
                   <button
@@ -458,11 +545,14 @@ export function TrainingWorkspace({
               )}
             </>
           )}
-        </aside>
+        </section>
         <div className="training-main">
           <section className="panel annotation-panel">
             <div className="panel-heading">
-              <h3>{sample ? "标注演唱区间" : "准备训练素材"}</h3>
+              <h3>
+                <span className="training-step">2</span> 预览与标注
+                {!sample && " · 先导入素材"}
+              </h3>
               {sample && (
                 <span className={dirty ? "unsaved" : "saved"}>
                   {dirty ? "● 标注未保存" : "✓ 标注已保存"}
@@ -560,7 +650,9 @@ export function TrainingWorkspace({
           </section>
           <section className="panel training-run-panel">
             <div className="panel-heading">
-              <h3>训练模型</h3>
+              <h3>
+                <span className="training-step">3</span> 训练模型
+              </h3>
               <span className="small muted">识别目标主播的演唱</span>
             </div>
             <div className="training-run-body">

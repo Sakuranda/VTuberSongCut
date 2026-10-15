@@ -128,4 +128,11 @@ class Job(Record):
     device: str | None = None
     status: Literal["queued", "running", "succeeded", "failed", "interrupted"] = "queued"
     message: str = "等待处理"
+    progress: float = Field(default=0, ge=0, le=1)
     artifacts: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def completed_progress(self):
+        if self.status == "succeeded":
+            self.progress = 1
+        return self

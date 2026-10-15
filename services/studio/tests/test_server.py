@@ -103,3 +103,13 @@ def test_desktop_cannot_accidentally_bind_publicly(monkeypatch):
     monkeypatch.setenv("SONGCUT_HOST", "0.0.0.0")
     with pytest.raises(ValueError, match="Non-loopback"):
         ServerConfig.load()
+
+
+def test_custom_desktop_port_loads_its_own_page_without_trusting_other_origins(tmp_path, monkeypatch):
+    monkeypatch.setenv("SONGCUT_SERVER", "0")
+    monkeypatch.setenv("SONGCUT_PORT", "8766")
+    settings = Settings(root=tmp_path, data=tmp_path / "data", upstream=tmp_path / "upstream", checkpoint=tmp_path / "missing.pt")
+    with TestClient(create_app(settings), base_url="http://127.0.0.1:8766") as client:
+        assert client.get("/api/session", headers={"Origin": "http://127.0.0.1:8766"}).status_code == 200
+        assert client.get("/api/session", headers={"Origin": "http://127.0.0.1:8767"}).status_code == 403
+        assert client.get("/api/session", headers={"Origin": "https://attacker.example"}).status_code == 403
