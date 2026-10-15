@@ -38,6 +38,7 @@ def main():
         raise SystemExit("vcpkg manifest and build pin disagree")
     if not (ROOT / "packaging/triplets" / f"{args.triplet}.cmake").is_file():
         raise SystemExit("Unknown release triplet")
+    (state / "downloads").mkdir(parents=True, exist_ok=True)
     environment = {**os.environ, "VCPKG_BINARY_SOURCES": "clear", "VCPKG_DISABLE_METRICS": "1",
                    "VCPKG_DOWNLOADS": str(state / "downloads")}
     # Restore installed packages only together with their source trees. A binary
