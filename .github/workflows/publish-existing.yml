@@ -1,0 +1,42 @@
+name: Publish verified desktop artifacts
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Version tag matching the application
+        required: true
+        default: v0.1.0
+      macos_run:
+        description: Successful macOS desktop build run ID
+        required: true
+      windows_run:
+        description: Successful Windows desktop build run ID
+        required: true
+      linux_run:
+        description: Successful Linux desktop build run ID
+        required: true
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: publish-existing-${{ inputs.release_tag }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify and publish existing native installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          MACOS_RUN: ${{ inputs.macos_run }}
+          WINDOWS_RUN: ${{ inputs.windows_run }}
+          LINUX_RUN: ${{ inputs.linux_run }}
+        run: python scripts/publish_existing_release.py

@@ -46,6 +46,8 @@ The standalone smoke check runs outside the checkout with a restricted PATH and 
 
 Run **Desktop release → Run workflow** with `release_tag` empty to build artifacts without publishing. A supplied version such as `v0.1.0` must match the desktop package/Cargo/Tauri versions and creates a prerelease at the tested commit only after the complete matrix passes. This can prepare and inspect a release while the repository remains private. For an isolated packaging failure, select `build_os` with `release_tag` empty; this produces only diagnostic artifacts and cannot publish a partial release. Inspect all three build jobs and download their artifacts for native installation tests. Then push an approved `v*` version tag: the same matrix runs again, and only after all three builds and standalone checks pass does the publish job create a GitHub prerelease with installers, matching MediaSources archives and platform SHA256SUMS files. This workflow never changes repository visibility. Release assets are platform-specific; the Apple build targets `aarch64-apple-darwin`.
 
+For a first release assembled from already successful platform repair runs, use **Publish verified desktop artifacts** and supply the three run IDs. This workflow performs no compilation: it checks successful producer jobs, matching application sources, installer reports, matching media source companions and checksums, then publishes the existing assets. `RELEASE-PROVENANCE.json` preserves each platform's actual build commit and run; packaging-only repairs may differ between platforms. Failed or expired artifacts cannot be published this way.
+
 ## Data and signatures
 
 Application resources are immutable; user projects, imported models and training output live under:
