@@ -14,6 +14,12 @@ on:
         required: false
         default: ''
         type: string
+      build_os:
+        description: 'Artifact-only platform diagnostics; releases must select all'
+        required: false
+        default: all
+        type: choice
+        options: [all, linux, windows, macos]
 permissions:
   contents: read
   actions: read
@@ -25,12 +31,14 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_tag: ${{ steps.version.outputs.release_tag }}
+      matrix: ${{ steps.version.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate requested release version
         id: version
         shell: python
         env:
+          BUILD_OS: ${{ inputs.build_os }}
           REQUESTED_TAG: ${{ inputs.release_tag }}
           REUSE_MEDIA_RUN: ${{ inputs.reuse_media_run }}
           REF_TYPE: ${{ github.ref_type }}
@@ -41,6 +49,14 @@ jobs:
           tag = os.environ.get('REQUESTED_TAG', '')
           if not tag and os.environ['REF_TYPE'] == 'tag':
               tag = os.environ['REF_NAME']
+          selection = os.environ.get('BUILD_OS') or 'all'
+          assert selection in {'all', 'linux', 'windows', 'macos'}, 'Invalid platform selection'
+          assert selection == 'all' or not tag, 'A partial diagnostic build cannot publish a release'
+          entries = [
+              dict(os='macos-15', target='aarch64-apple-darwin', triplet='arm64-osx-songcut', bundle='dmg', label='macOS-AppleSilicon', platform='macos'),
+              dict(os='windows-latest', target='x86_64-pc-windows-msvc', triplet='x64-windows-songcut', bundle='nsis', label='Windows-x64', platform='windows'),
+              dict(os='ubuntu-22.04', target='x86_64-unknown-linux-gnu', triplet='x64-linux-songcut', bundle='appimage,deb', label='Linux-x64', platform='linux')]
+          matrix = {'include': [entry for entry in entries if selection == 'all' or entry['platform'] == selection]}
           if tag:
               assert re.fullmatch(r'v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?', tag), 'Invalid release tag'
               config = json.loads(pathlib.Path('apps/desktop/src-tauri/tauri.conf.json').read_text())
@@ -50,6 +66,7 @@ jobs:
               assert tag[1:] == config['version'] == package['version'] == cargo_version, 'Bump desktop package, Cargo and Tauri versions together before releasing'
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'release_tag={tag}\n')
+              output.write('matrix=' + json.dumps(matrix) + '\n')
   build:
     needs: validate
     timeout-minutes: 90
@@ -58,23 +75,7 @@ jobs:
       PYTHONIOENCODING: utf-8
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: macos-15
-            target: aarch64-apple-darwin
-            triplet: arm64-osx-songcut
-            bundle: dmg
-            label: macOS-AppleSilicon
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            triplet: x64-windows-songcut
-            bundle: nsis
-            label: Windows-x64
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            triplet: x64-linux-songcut
-            bundle: appimage,deb
-            label: Linux-x64
+      matrix: ${{ fromJSON(needs.validate.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -116,6 +117,8 @@ jobs:
         with:
           path: |
             work/media/installed
+            work/media/media-build.json
+            work/media/build-command.json
             work/media/vcpkg/buildtrees
             work/media/build-history
             work/media/source-archives
@@ -130,8 +133,16 @@ jobs:
       - name: macOS media source-build dependencies
         if: runner.os == 'macOS'
         run: brew install autoconf automake libtool pkg-config nasm
-      - name: Build controlled media from pinned sources
-        run: python scripts/build_release_media.py --triplet ${{ matrix.triplet }}
+      - name: Build or verify controlled media from pinned sources
+        shell: bash
+        env:
+          EXACT_MEDIA_CACHE: ${{ steps.media-cache.outputs.cache-hit }}
+        run: |
+          if [[ "$EXACT_MEDIA_CACHE" == "true" ]]; then
+            python scripts/build_release_media.py --triplet ${{ matrix.triplet }} --reuse-verified-cache
+          else
+            python scripts/build_release_media.py --triplet ${{ matrix.triplet }}
+          fi
       - name: Validate complete media/source pair and preserve logs for caching
         run: python scripts/export_media_sources.py --label ${{ matrix.label }} --prepare-cache
       - name: Save completed media build before application packaging
@@ -140,6 +151,8 @@ jobs:
         with:
           path: |
             work/media/installed
+            work/media/media-build.json
+            work/media/build-command.json
             work/media/vcpkg/buildtrees
             work/media/build-history
             work/media/source-archives
@@ -176,7 +189,7 @@ jobs:
         working-directory: apps/desktop
         env:
           NO_STRIP: 'true'
-        run: npm ci && npm run build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
+        run: npm ci && npm run build -- --verbose --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
       - name: Verify installed macOS DMG contents
         if: runner.os == 'macOS'
         run: python scripts/smoke_macos_installer.py apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle --report release-assets/macOS-installer-smoke.json

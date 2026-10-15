@@ -198,3 +198,48 @@ def test_verified_cache_can_be_reused_after_later_app_step_fails(monkeypatch):
     assert waiter.cache_state([job]) == "ready"
     job["steps"][0]["conclusion"] = "failure"
     assert waiter.cache_state([job]) == "failed"
+
+
+def test_exact_verified_media_cache_avoids_compiler_and_still_requires_sources(exporter, media_state, monkeypatch):
+    import shutil
+    builder = importlib.import_module("build_release_media")
+    state, _, _ = media_state
+    root = state.parent
+    destination = root / "work/media"
+    destination.parent.mkdir()
+    shutil.move(state, destination)
+    state = destination
+    packaging = root / "packaging"
+    (packaging / "triplets").mkdir(parents=True)
+    (packaging / "triplets/test-triplet.cmake").write_text("release triplet")
+    (packaging / "vcpkg.json").write_text(json.dumps({"builtin-baseline": builder.PIN}))
+    port = state / "vcpkg/ports/ffmpeg"
+    port.mkdir(parents=True)
+    (port / "vcpkg.json").write_text(json.dumps({"version": "9.0.2"}))
+    monkeypatch.setattr(builder, "ROOT", root)
+    monkeypatch.setattr(builder.platform, "platform", lambda: "cached validation host")
+    monkeypatch.setattr(builder.sys, "argv", ["build_release_media.py", "--triplet", "test-triplet", "--reuse-verified-cache"])
+    monkeypatch.setenv("GITHUB_ENV", str(root / "github-env"))
+
+    def no_build(*args, **kwargs):
+        raise AssertionError("A verified executable cache must not invoke bootstrap or the native compiler")
+
+    def inspect(command, **kwargs):
+        if command[0] == "git":
+            return builder.PIN + "\n"
+        if "-filters" in command:
+            return " T.. ass V->V\n"
+        if "-encoders" in command:
+            return "libx264 libx265 libmp3lame\n"
+        return "ffmpeg version 9.0.2 --enable-gpl\n"
+
+    monkeypatch.setattr(builder.subprocess, "run", no_build)
+    monkeypatch.setattr(builder.subprocess, "Popen", no_build)
+    monkeypatch.setattr(builder.subprocess, "check_output", inspect)
+    builder.main()
+    record = json.loads((state / "build-command.json").read_text())
+    assert record["reused_verified_cache"] is True and record["executed"] is False
+    assert "Extracting source" in (state / "build.log").read_text()
+    shutil.rmtree(state / "vcpkg/buildtrees/x264/src")
+    with pytest.raises(ValueError, match="Missing actual patched"):
+        builder.main()
