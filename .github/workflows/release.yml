@@ -91,24 +91,42 @@ jobs:
         with:
           path: work/media/downloads
           key: media-downloads-${{ runner.os }}-${{ hashFiles('packaging/vcpkg.json') }}
-      - name: Cache installed media together with its source trees and logs
-        uses: actions/cache@v4
+      - name: Restore installed media together with its source trees and logs
+        id: media-cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             work/media/installed
             work/media/vcpkg/buildtrees
             work/media/build-history
             work/media/source-archives
+            work/media/port-logs
             work/media/build.log
-          key: media-built-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('packaging/**', 'scripts/build_release_media.py', 'scripts/export_media_sources.py') }}
+          key: media-built-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('packaging/vcpkg.json', format('packaging/triplets/{0}.cmake', matrix.triplet), format('packaging/ports/{0}/**', matrix.triplet)) }}
+          restore-keys: |
+            media-built-${{ runner.os }}-${{ matrix.triplet }}-
       - name: Linux build dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf autoconf automake libtool pkg-config nasm
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf autoconf autoconf-archive automake libtool pkg-config nasm
       - name: macOS media source-build dependencies
         if: runner.os == 'macOS'
         run: brew install autoconf automake libtool pkg-config nasm
       - name: Build controlled media from pinned sources
         run: python scripts/build_release_media.py --triplet ${{ matrix.triplet }}
+      - name: Validate complete media/source pair and preserve logs for caching
+        run: python scripts/export_media_sources.py --label ${{ matrix.label }} --prepare-cache
+      - name: Save completed media build before application packaging
+        if: steps.media-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            work/media/installed
+            work/media/vcpkg/buildtrees
+            work/media/build-history
+            work/media/source-archives
+            work/media/port-logs
+            work/media/build.log
+          key: ${{ steps.media-cache.outputs.cache-primary-key }}
       - name: Python application and freezing tools
         run: python -m pip install -e "services/studio[dev]" "pyinstaller>=6.16,<7" "numpy>=2,<3" "scipy>=1.14,<2" "tensorboard>=2.18,<3" "requests>=2.32,<3"
       - name: CPU ML runtime
@@ -140,6 +158,19 @@ jobs:
         env:
           NO_STRIP: 'true'
         run: npm ci && npm run build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
+      - name: Verify installed macOS DMG contents
+        if: runner.os == 'macOS'
+        run: python scripts/smoke_macos_installer.py apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle --report release-assets/macOS-installer-smoke.json
+      - name: Verify installed Windows NSIS contents
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if (-not $installer) { throw "NSIS installer missing" }
+          ./scripts/smoke_windows_installer.ps1 -Installer $installer.FullName
+      - name: Verify installed Linux AppImage and deb contents
+        if: runner.os == 'Linux'
+        run: python scripts/smoke_linux_installers.py apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle --report release-assets/Linux-installer-smoke.json
       - name: Export matching patched media sources, recipes and binary manifest
         run: python scripts/export_media_sources.py --label ${{ matrix.label }} --prune-build-outputs
       - name: Collect installers and checksums

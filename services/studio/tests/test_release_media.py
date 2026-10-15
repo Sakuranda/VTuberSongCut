@@ -43,7 +43,10 @@ def media_state(tmp_path, exporter, monkeypatch):
     for name in ("ffmpeg", "ffprobe"):
         binary = binaries / name
         binary.write_bytes(b"frozen executable")
-        records[name] = {"sha256": "original-build-hash", "version": "controlled version\n"}
+        original = state / "installed/test-triplet/tools/ffmpeg" / name
+        original.parent.mkdir(parents=True, exist_ok=True)
+        original.write_bytes(b"controlled build executable")
+        records[name] = {"sha256": exporter.digest(original), "version": "controlled version\n"}
     (state / "media-build.json").write_text(json.dumps({"vcpkg_commit": exporter.PIN, "triplet": "test-triplet", "binaries": records}))
     monkeypatch.setattr(exporter.subprocess, "check_output", lambda *args, **kwargs: "controlled version\n")
     return state, backend, tmp_path / "output"
@@ -139,3 +142,45 @@ def test_fresh_bootstrap_creates_download_directory_before_running_tools(tmp_pat
     builder.main()
     assert (state / "media-build.json").is_file()
     assert "SONGCUT_BUILD_FFMPEG=" in (tmp_path / "github-env").read_text()
+
+
+def test_early_cache_preserves_nested_logs_sources_and_matching_binaries(exporter, media_state):
+    state, backend, output = media_state
+    build = state / "vcpkg/buildtrees/ffmpeg/triplet-rel/ffbuild"
+    build.mkdir(parents=True)
+    (build / "config.log").write_text("actual native compiler/configure record")
+    (build / "compiled.o").write_bytes(b"compiled object")
+    exporter.prepare_cache(state, check_checkout=False)
+    assert not build.exists()
+    assert (state / "port-logs/ffmpeg/triplet-rel/ffbuild/config.log").read_text() == "actual native compiler/configure record"
+    (state / "downloads/ffmpeg-source.tar.gz").unlink()
+    companion = exporter.export(state, "fixture", backend, output, check_checkout=False)
+    with tarfile.open(companion) as archive:
+        member = "MediaSources-fixture/build-records/ports/ffmpeg/triplet-rel/ffbuild/config.log"
+        assert archive.extractfile(member).read() == b"actual native compiler/configure record"
+        assert not any(name.endswith("compiled.o") for name in archive.getnames())
+
+
+def test_early_cache_rejects_a_binary_changed_after_source_build(exporter, media_state):
+    state, _, _ = media_state
+    (state / "installed/test-triplet/tools/ffmpeg/ffmpeg").write_bytes(b"replaced executable")
+    with pytest.raises(ValueError, match="does not match its controlled build record"):
+        exporter.prepare_cache(state, check_checkout=False)
+
+
+def test_known_system_shims_are_recipe_only_on_linux_but_windows_keeps_real_sources(exporter, media_state):
+    state, _, _ = media_state
+    status = state / "installed/vcpkg/status"
+    with status.open("a") as output:
+        for port in ("pthread", "pthreads", "libiconv"):
+            output.write(f"\n\nPackage: {port}\nArchitecture: platform\nStatus: install ok installed")
+    record_path = state / "media-build.json"
+    record = json.loads(record_path.read_text())
+    record["triplet"] = "x64-linux-songcut"
+    record_path.write_text(json.dumps(record))
+    _, _, _, recipe_only, _ = exporter.inspect_source_inputs(state)
+    assert {"pthread", "pthreads", "libiconv"} <= recipe_only
+    record["triplet"] = "x64-windows-songcut"
+    record_path.write_text(json.dumps(record))
+    with pytest.raises(ValueError, match="Installed packages lack source coverage"):
+        exporter.inspect_source_inputs(state)

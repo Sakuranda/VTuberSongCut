@@ -44,6 +44,31 @@ def main():
         for tool in ("ffmpeg", "ffprobe"):
             subprocess.run([str(resources / "bin" / (tool + suffix)), "-version"], cwd=folder,
                            env=env, capture_output=True, check=True, timeout=30)
+        # Validate real encoding/subtitle rendering using the shipped CJK font.
+        import shutil
+        ffmpeg, ffprobe = (str(resources / "bin" / (tool + suffix)) for tool in ("ffmpeg", "ffprobe"))
+        fonts = folder / "fonts"
+        fonts.mkdir()
+        shutil.copy2(resources / "fonts/NotoSansCJKsc-Regular.otf", fonts / "NotoSansCJKsc-Regular.otf")
+        (folder / "check.ass").write_text(
+            "[Script Info]\nScriptType: v4.00+\nPlayResX: 320\nPlayResY: 180\n"
+            "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+            "Style: Default,Noto Sans CJK SC,22,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,12,1\n"
+            "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+            "Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,拾歌 · 打包字幕验收\n", encoding="utf-8")
+        def media(arguments):
+            return subprocess.run([ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", *arguments],
+                                  cwd=folder, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90, check=True)
+        media(["-f", "lavfi", "-i", "testsrc2=size=320x180:rate=10", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000",
+               "-t", "2", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "synthetic.mp4"])
+        media(["-i", "synthetic.mp4", "-vf", "ass=check.ass:fontsdir=fonts", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "copy", "subtitled.mp4"])
+        media(["-i", "subtitled.mp4", "-vn", "-c:a", "libmp3lame", "check.mp3"])
+        for filename, required in (("subtitled.mp4", {"h264", "aac"}), ("check.mp3", {"mp3"})):
+            result = subprocess.check_output([ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", filename], cwd=folder,
+                                             env=env, text=True, encoding="utf-8", errors="replace", timeout=30)
+            details = json.loads(result)
+            assert required <= {stream["codec_name"] for stream in details["streams"]}
+            assert float(details["format"]["duration"]) >= 1.9
         # Exercise the frozen prepare -> original train -> probe -> infer chain,
         # including real log-mel extraction, without shipping any test model.
         samples = []

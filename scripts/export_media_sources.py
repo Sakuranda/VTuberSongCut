@@ -58,10 +58,8 @@ def collect_source_archives(downloads: Path, logs: list[Path]) -> list[Path]:
     return result
 
 
-def export(state: Path, label: str, backend: Path, output: Path, *, check_checkout=True) -> Path:
+def inspect_source_inputs(state: Path):
     vcpkg = state / "vcpkg"
-    if check_checkout and subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=vcpkg, text=True).strip() != PIN:
-        raise ValueError("vcpkg checkout no longer matches the build pin")
     record = json.loads((state / "media-build.json").read_text(encoding="utf-8"))
     if record["vcpkg_commit"] != PIN:
         raise ValueError("Media build pin mismatch")
@@ -73,7 +71,11 @@ def export(state: Path, label: str, backend: Path, output: Path, *, check_checko
         raise ValueError(f"Missing actual patched library source trees: {sorted(missing)}")
     # These helper ports consist of the versioned recipe itself. Every other
     # installed dependency must have its actual extracted/patched source tree.
-    recipe_only = {port for port in ports if port.startswith("vcpkg-") or port == "ffmpeg-bin2c"}
+    recipe_only = {port for port in ports if port.startswith("vcpkg-") or port in {"ffmpeg-bin2c", "pthread"}}
+    # The pinned non-Windows ports are empty shims over the platform iconv/pthreads.
+    # Windows MSVC builds those libraries and must retain their actual source.
+    if record["triplet"].startswith(("x64-linux", "arm64-osx")):
+        recipe_only.update((ports - trees.keys()) & {"libiconv", "pthreads"})
     missing = ports - trees.keys() - recipe_only
     if missing:
         raise ValueError(f"Installed packages lack source coverage: {sorted(missing)}")
@@ -90,6 +92,45 @@ def export(state: Path, label: str, backend: Path, output: Path, *, check_checko
         cached = source_cache / archive.name
         if archive.resolve() != cached.resolve():
             shutil.copy2(archive, cached)
+    return record, ports, trees, recipe_only, archives
+
+
+def capture_port_logs(state: Path):
+    """Keep nested configure logs before object directories are pruned."""
+    target = state / "port-logs"
+    for port in (state / "vcpkg/buildtrees").iterdir():
+        if not port.is_dir():
+            continue
+        source = port / "src"
+        for log in port.rglob("*.log"):
+            if source in log.parents or not log.is_file():
+                continue
+            saved = target / port.name / log.relative_to(port)
+            saved.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(log, saved)
+
+
+def prepare_cache(state: Path, *, check_checkout=True):
+    """Validate and retain a complete source/binary pair before later app steps."""
+    if check_checkout and subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=state / "vcpkg", text=True).strip() != PIN:
+        raise ValueError("vcpkg checkout no longer matches the build pin")
+    record, _, _, _, _ = inspect_source_inputs(state)
+    suffix = ".exe" if record["triplet"].startswith("x64-windows") else ""
+    for name, built in record["binaries"].items():
+        binary = state / "installed" / record["triplet"] / "tools/ffmpeg" / (name + suffix)
+        if not binary.is_file() or digest(binary) != built["sha256"]:
+            raise ValueError(f"Installed {name} does not match its controlled build record")
+    capture_port_logs(state)
+    prune_build_outputs(state)
+    print("Matched controlled media, patched/original sources and logs are ready for early caching")
+
+
+def export(state: Path, label: str, backend: Path, output: Path, *, check_checkout=True) -> Path:
+    vcpkg = state / "vcpkg"
+    if check_checkout and subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=vcpkg, text=True).strip() != PIN:
+        raise ValueError("vcpkg checkout no longer matches the build pin")
+    record, ports, trees, recipe_only, archives = inspect_source_inputs(state)
+    capture_port_logs(state)
     output.mkdir(parents=True, exist_ok=True)
     staging = state / "source-export" / f"MediaSources-{label}"
     if staging.exists():
@@ -113,6 +154,8 @@ def export(state: Path, label: str, backend: Path, output: Path, *, check_checko
         shutil.copy2(state / name, metadata / name)
     if (state / "build-history").is_dir():
         shutil.copytree(state / "build-history", metadata / "build-history")
+    if (state / "port-logs").is_dir():
+        shutil.copytree(state / "port-logs", metadata / "ports")
     shutil.copytree(state / "installed/vcpkg", metadata / "installed-vcpkg", ignore=shutil.ignore_patterns("updates"))
     for installed_triplet in sorted((state / "installed").iterdir()):
         if (installed_triplet / "share").is_dir():
@@ -138,10 +181,6 @@ def export(state: Path, label: str, backend: Path, output: Path, *, check_checko
         archive.add(staging, arcname=staging.name, filter=source_filter)
         for port, tree in sorted(trees.items()):
             archive.add(tree, arcname=f"{staging.name}/patched-sources/{port}/src", filter=source_filter)
-            # Capture configure/build logs while excluding object/build outputs.
-            for log in sorted(tree.parent.rglob("*.log")):
-                if tree not in log.parents:
-                    archive.add(log, arcname=f"{staging.name}/build-records/ports/{port}/{log.relative_to(tree.parent).as_posix()}")
         for source in archives:
             archive.add(source, arcname=f"{staging.name}/original-source-archives/{source.name}")
     print(f"Source companion ready: {target}")
@@ -170,8 +209,12 @@ def main():
     parser.add_argument("--backend", type=Path, default=ROOT / "apps/desktop/src-tauri/binaries/songcut-backend")
     parser.add_argument("--output", type=Path, default=ROOT / "release-assets")
     parser.add_argument("--prune-build-outputs", action="store_true")
+    parser.add_argument("--prepare-cache", action="store_true", help="Validate/cache sources and installed media immediately after compilation")
     args = parser.parse_args()
     state = ROOT / "work/media"
+    if args.prepare_cache:
+        prepare_cache(state)
+        return
     export(state, args.label, args.backend.resolve(), args.output.resolve())
     if args.prune_build_outputs:
         prune_build_outputs(state)

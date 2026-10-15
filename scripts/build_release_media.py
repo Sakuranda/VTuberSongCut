@@ -49,6 +49,9 @@ def main():
     command = [str(executable), "install", f"--triplet={args.triplet}",
                f"--x-manifest-root={ROOT / 'packaging'}", f"--x-install-root={state / 'installed'}",
                f"--overlay-triplets={ROOT / 'packaging/triplets'}", "--no-print-usage"]
+    overlay = ROOT / "packaging/ports" / args.triplet
+    if overlay.is_dir():
+        command.append(f"--overlay-ports={overlay}")
     with (state / "build-command.json").open("w", encoding="utf-8") as output:
         json.dump({"argv": command, "vcpkg_commit": PIN, "triplet": args.triplet,
                    "platform": platform.platform(), "python": sys.version,
