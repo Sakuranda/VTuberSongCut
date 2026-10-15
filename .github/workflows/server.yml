@@ -1,0 +1,92 @@
+name: Server Docker
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build full CPU server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: songcut-server:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Generate ephemeral test credentials
+        run: |
+          python - <<'PY'
+          import os, secrets
+          from pathlib import Path
+          password = secrets.token_hex(32)
+          print(f'::add-mask::{password}')
+          Path('.env.server').write_text('SONGCUT_SERVER_USERNAME=admin\n'
+              f'SONGCUT_SERVER_PASSWORD={password}\nSONGCUT_PUBLIC_ORIGIN=http://localhost:8765\n')
+          os.chmod('.env.server', 0o600)
+          PY
+      - name: Start real container and wait for healthy API
+        run: docker compose --env-file .env.server up -d --no-build --wait --wait-timeout 180
+      - name: Verify authentication, web UI, media upload/range, CPU model runtime and persistence
+        run: |
+          python - <<'PY'
+          import base64, io, json, subprocess, urllib.error, urllib.request, wave
+          from pathlib import Path
+          env = dict(line.split('=', 1) for line in Path('.env.server').read_text().splitlines())
+          authorization = 'Basic ' + base64.b64encode(('admin:' + env['SONGCUT_SERVER_PASSWORD']).encode()).decode()
+          def request(path, method='GET', data=None, headers=None, authenticated=True):
+              supplied = {'Authorization': authorization} if authenticated else {}
+              supplied.update(headers or {})
+              req = urllib.request.Request('http://localhost:8765' + path, data=data, method=method, headers=supplied)
+              try:
+                  return urllib.request.urlopen(req, timeout=120)
+              except urllib.error.HTTPError as error:
+                  return error
+          assert request('/api/health', authenticated=False).status == 200
+          for path in ['/', '/api/session', '/api/projects', '/api/models', '/api/training/datasets',
+                       '/api/projects/missing/media', '/api/models/missing/download', '/api/artifacts/missing/clip.mp4']:
+              assert request(path, authenticated=False).status == 401, path
+          assert b'<!doctype html>' in request('/').read().lower()
+          token = json.load(request('/api/session'))['token']
+          assert request('/api/training/datasets', 'POST', b'{}', {'Content-Type': 'application/json'}).status == 403
+          assert request('/api/session', headers={'Origin': 'https://attacker.invalid'}).status == 403
+          assert request('/api/projects', headers={'Host': 'attacker.invalid'}).status == 400
+          capabilities = json.load(request('/api/capabilities'))
+          assert capabilities['ffmpeg'] and capabilities['ffprobe'] and capabilities['subtitle_burn'] and capabilities['detector_ready']
+          models = json.load(request('/api/models'))
+          assert models['engine_ready'], models['engine_error']
+          assert any(d['id'] == 'cpu' and d['available'] for d in models['devices'])
+          audio = io.BytesIO()
+          with wave.open(audio, 'wb') as output:
+              output.setparams((1, 2, 16000, 16000, 'NONE', 'not compressed'))
+              output.writeframes(b'\0\0' * 16000)
+          boundary = 'SongCutSmokeBoundary'
+          multipart = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="smoke.wav"\r\n'
+                       'Content-Type: audio/wav\r\n\r\n').encode() + audio.getvalue() + f'\r\n--{boundary}--\r\n'.encode()
+          response = request('/api/projects/upload', 'POST', multipart,
+              {'Content-Type': f'multipart/form-data; boundary={boundary}', 'x-studio-token': token})
+          assert response.status == 201, response.read()
+          project = json.load(response)
+          path = f"/api/projects/{project['id']}/media"
+          assert request(path, authenticated=False).status == 401
+          media = request(path, headers={'Range': 'bytes=0-3'})
+          assert media.status == 206 and media.read() == b'RIFF'
+          subprocess.run(['docker', 'compose', '--env-file', '.env.server', 'restart', 'songcut'], check=True)
+          subprocess.run(['docker', 'compose', '--env-file', '.env.server', 'up', '-d', '--no-build', '--wait', '--wait-timeout', '90'], check=True)
+          assert json.load(request(f"/api/projects/{project['id']}"))['id'] == project['id']
+          print('Real Docker smoke passed: web, auth, CSRF, CPU engine, FFmpeg, upload, Range media, persistent workspace.')
+          PY
+      - name: Container diagnostics
+        if: failure()
+        run: docker compose --env-file .env.server logs --no-color --tail 150
+      - name: Stop test containers
+        if: always()
+        run: docker compose --env-file .env.server down --volumes

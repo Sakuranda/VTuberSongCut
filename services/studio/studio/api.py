@@ -1,4 +1,4 @@
-"""Loopback-only HTTP controller. Both browser and desktop use the same API."""
+"""Shared desktop/server HTTP controller, with explicit authenticated server mode."""
 from contextlib import asynccontextmanager
 import hmac
 from pathlib import Path
@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .config import Settings
+from .server_config import ServerConfig
 from .domain import Record, Project, Clip, Job
 from .store import Store, ConflictError
 from .jobs import JobRunner
@@ -57,6 +58,7 @@ class StartTraining(Record):
 
 
 def create_app(settings: Settings | None = None):
+    server = ServerConfig.load()
     config = settings or Settings.load()
     store = Store(config.data / "studio.sqlite3")
     runner = JobRunner(store)
@@ -78,17 +80,30 @@ def create_app(settings: Settings | None = None):
     app.state.studio = studio
     app.state.models = library
     app.state.training = training
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=server.allowed_hosts)
 
     @app.middleware("http")
-    async def protect_local_service(request: Request, call_next):
+    async def protect_service(request: Request, call_next):
         origin = request.headers.get("origin")
-        if origin and origin not in {"http://127.0.0.1:8765", "http://localhost:8765", "http://127.0.0.1:5173", "http://localhost:5173"}:
-            return JSONResponse({"detail": "此服务仅接受本机工作台请求"}, status_code=403)
+        if origin and origin not in server.allowed_origins:
+            return JSONResponse({"detail": "请求来源不在工作台允许列表中"}, status_code=403)
+        # Authenticate the UI as well, so browser-native media/range/download requests
+        # reuse the browser's HTTP Basic credentials. Only liveness is public.
+        if server.enabled and request.url.path != "/api/health":
+            if not server.authenticate(request.headers.get("authorization", "")):
+                return JSONResponse({"detail": "请使用服务器账户登录"}, status_code=401,
+                                    headers={"WWW-Authenticate": 'Basic realm="SongCut", charset="UTF-8"',
+                                             "Cache-Control": "no-store"})
         if request.url.path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
             if not hmac.compare_digest(request.headers.get("x-studio-token", ""), token):
                 return JSONResponse({"detail": "会话已失效，请刷新工作台"}, status_code=403)
-        return await call_next(request)
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["X-Frame-Options"] = "DENY"
+        if server.enabled and request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.exception_handler(KeyError)
     async def not_found(request, error):
@@ -351,7 +366,9 @@ def create_app(settings: Settings | None = None):
 
 def main():
     import uvicorn
-    uvicorn.run(create_app(), host="127.0.0.1", port=8765, access_log=False)
+    server = ServerConfig.load()
+    uvicorn.run(create_app(), host=server.host, port=server.port, access_log=False,
+                proxy_headers=server.enabled, forwarded_allow_ips="127.0.0.1")
 
 
 if __name__ == "__main__":

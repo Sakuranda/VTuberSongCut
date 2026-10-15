@@ -1,5 +1,7 @@
-//! Development desktop host. The packaged Python sidecar is a separate release milestone.
+//! Desktop host for the bundled Python/ML runtime.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::{
+    fs,
     io::{self, Read, Write},
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
@@ -94,12 +96,12 @@ fn probe_service(address: SocketAddr) -> ServiceState {
 
 /// Owns only a backend spawned by this shell; a reused service has no child here.
 /// Drop also covers startup timeout, window construction failure, and setup errors.
-struct Backend(Mutex<Option<Child>>);
+struct Backend(Mutex<Option<Child>>, Option<PathBuf>);
 
 impl Backend {
-    fn start(root: &Path, address: SocketAddr) -> Result<Self, StartupError> {
+    fn start(root: &Path, resources: &Path, address: SocketAddr) -> Result<Self, StartupError> {
         match probe_service(address) {
-            ServiceState::Ready => return Ok(Self(Mutex::new(None))),
+            ServiceState::Ready => return Ok(Self(Mutex::new(None), None)),
             ServiceState::Unavailable(reason) => {
                 return Err(format!(
                     "端口 8765 已被其他服务占用或无法验证，请先关闭该服务：{reason}"
@@ -108,19 +110,39 @@ impl Backend {
             }
             ServiceState::Missing => {}
         }
-        // The service lives in the repository venv. SONGCUT_MODEL_PYTHON is reserved
-        // for the separate model interpreter configured by the Python backend.
-        let python = root.join(if cfg!(windows) {
-            ".venv/Scripts/python.exe"
+        let executable = resources.join("backend").join(if cfg!(windows) {
+            "songcut-backend.exe"
         } else {
-            ".venv/bin/python"
+            "songcut-backend"
         });
-        let child = Command::new(python)
-            .args(["-m", "studio.api"])
-            .current_dir(root)
+        let shutdown =
+            std::env::temp_dir().join(format!("songcut-shutdown-{}", std::process::id()));
+        let _ = fs::remove_file(&shutdown);
+        let mut command = if executable.is_file() {
+            Command::new(executable)
+        } else if cfg!(debug_assertions) {
+            let mut command = Command::new(root.join(if cfg!(windows) {
+                ".venv/Scripts/python.exe"
+            } else {
+                ".venv/bin/python"
+            }));
+            command.args(["-m", "studio.launcher"]).current_dir(root);
+            command
+        } else {
+            return Err("安装包缺少内置运行环境，请重新下载安装包".into());
+        };
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        let child = command
+            .env("SONGCUT_SERVER", "0")
+            .env("SONGCUT_PORT", "8765")
+            .env("SONGCUT_SHUTDOWN_FILE", &shutdown)
             .spawn()?;
-        let backend = Self(Mutex::new(Some(child)));
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let backend = Self(Mutex::new(Some(child)), Some(shutdown));
+        let deadline = Instant::now() + Duration::from_secs(90);
         loop {
             {
                 let mut slot = backend.0.lock().unwrap_or_else(|error| error.into_inner());
@@ -141,8 +163,24 @@ impl Backend {
     fn stop(&self) {
         let mut slot = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if let Some(mut child) = slot.take() {
+            // The private file asks Uvicorn to run application shutdown, which
+            // cancels and reaps owned training workers on every supported OS.
+            if let Some(path) = &self.1 {
+                let _ = fs::write(path, b"shutdown");
+                let deadline = Instant::now() + Duration::from_secs(15);
+                while Instant::now() < deadline {
+                    if matches!(child.try_wait(), Ok(Some(_))) {
+                        let _ = fs::remove_file(path);
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+            }
             let _ = child.kill();
             let _ = child.wait();
+            if let Some(path) = &self.1 {
+                let _ = fs::remove_file(path);
+            }
         }
     }
 }
@@ -156,11 +194,11 @@ impl Drop for Backend {
 fn main() {
     let app = tauri::Builder::default()
         .setup(|app| {
-            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../..")
-                .canonicalize()?;
+            // Build-time source paths are used only during development.
+            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+            let resources = app.path().resource_dir()?;
             let address: SocketAddr = "127.0.0.1:8765".parse()?;
-            let backend = Backend::start(&root, address)?;
+            let backend = Backend::start(&root, &resources, address)?;
             WebviewWindowBuilder::new(
                 app,
                 "main",
@@ -239,7 +277,7 @@ mod tests {
     fn dropping_owned_backend_stops_child_while_reused_backend_has_no_process() {
         let child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
         let pid = child.id();
-        drop(Backend(Mutex::new(Some(child))));
+        drop(Backend(Mutex::new(Some(child)), None));
         let alive = Command::new("/bin/kill")
             .args(["-0", &pid.to_string()])
             .output()
@@ -248,6 +286,6 @@ mod tests {
             !alive.status.success(),
             "owned process must be reaped on drop"
         );
-        drop(Backend(Mutex::new(None)));
+        drop(Backend(Mutex::new(None), None));
     }
 }

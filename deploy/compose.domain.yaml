@@ -1,0 +1,21 @@
+# Merge with compose.yaml; keep the application port bound to host loopback.
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SONGCUT_DOMAIN: ${SONGCUT_DOMAIN:?Set a domain with scripts/deploy.sh --domain songs.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      songcut:
+        condition: service_healthy
+volumes:
+  caddy-data:
+  caddy-config:

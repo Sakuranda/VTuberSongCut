@@ -1,0 +1,12 @@
+{
+  "name": "songcut-release-media",
+  "version-string": "0.1.0",
+  "builtin-baseline": "20ceb8adbf0504d4b0d5e4058a32f9d4fc896391",
+  "dependencies": [
+    {
+      "name": "ffmpeg",
+      "default-features": false,
+      "features": ["avcodec", "avdevice", "avfilter", "avformat", "swresample", "swscale", "ffmpeg", "ffprobe", "ass", "mp3lame", "gpl", "x264", "x265"]
+    }
+  ]
+}

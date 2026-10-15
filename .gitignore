@@ -16,3 +16,8 @@ var/
 *.log
 *.tsbuildinfo
 apps/desktop/src-tauri/gen/
+
+!.env.*.example
+
+/work/
+/apps/desktop/src-tauri/binaries/

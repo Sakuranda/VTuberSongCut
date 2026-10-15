@@ -9,6 +9,10 @@ from pathlib import Path
 import subprocess
 import sys
 
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from studio.runtime import worker_command
+
 
 def atomic_json(path, value):
     temporary = path.with_suffix(".tmp")
@@ -69,9 +73,9 @@ def main(snapshot_path):
             raise RuntimeError(f"{split} 特征对齐后缺少正样本或负样本，请扩大有效标注区间")
         atomic_json(directory / f"manifest_{split}.json", items)
     atomic_json(directory / "progress.json", dict(stage="training", message="正在学习目标主播的演唱特征", progress=.2))
-    command = [sys.executable, "-u", str(upstream / "src/train.py"), "--model", "crnn", "--classes", "1",
+    command = worker_command("train", ["--model", "crnn", "--classes", "1",
                "--run-name", "model", "--manifest", str(directory / "manifest_train.json"),
-               "--val-manifest", str(directory / "manifest_validation.json"), "--input-type", "mel", "--out-fps", "3.125"]
+               "--val-manifest", str(directory / "manifest_validation.json"), "--input-type", "mel", "--out-fps", "3.125"], repository=upstream)
     for name in ("device", "steps", "batch_size", "num_workers", "window_s", "val_every", "lr", "seed", "warmup"):
         command.extend(["--" + name.replace("_", "-"), str(config[name])])
     # Available only to direct test fixtures, never accepted by the service API.
@@ -80,7 +84,7 @@ def main(snapshot_path):
     environment = os.environ.copy()
     environment.setdefault("OMP_NUM_THREADS", "4")
     environment.setdefault("MKL_NUM_THREADS", "4")
-    result = subprocess.run(command, cwd=directory, env=environment)
+    result = subprocess.run(command, cwd=directory, env=environment, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     if result.returncode:
         raise RuntimeError(f"原版训练程序退出，代码 {result.returncode}")
     checkpoint = directory / "runs/model/best.pt"

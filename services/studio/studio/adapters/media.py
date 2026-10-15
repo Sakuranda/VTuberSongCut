@@ -16,13 +16,13 @@ class FFmpegMedia:
 
     def run(self, args: list[str], cwd: Path | None = None, timeout: int = 6*3600):
         result = subprocess.run([self.ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", *args],
-                                cwd=cwd, capture_output=True, text=True, timeout=timeout)
+                                cwd=cwd, capture_output=True, text=True, timeout=timeout, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         if result.returncode:
             raise RuntimeError("媒体处理失败：" + result.stderr[-1500:])
 
     def probe(self, source: Path) -> tuple[int, bool]:
         result = subprocess.run([self.ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(source)],
-                                capture_output=True, text=True, check=True, timeout=60)
+                                capture_output=True, text=True, check=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         data = json.loads(result.stdout)
         if not any(s["codec_type"] == "audio" for s in data["streams"]):
             raise ValueError("录播需要包含音轨")
@@ -35,7 +35,7 @@ class FFmpegMedia:
         from fractions import Fraction
         try:
             result = subprocess.run([self.ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=avg_frame_rate", "-of", "json", str(source)],
-                                    capture_output=True, text=True, check=True, timeout=30)
+                                    capture_output=True, text=True, check=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
             streams = json.loads(result.stdout).get("streams", [])
             rate = float(Fraction(streams[0]["avg_frame_rate"])) if streams else 0
             return rate if rate > 0 else None
@@ -46,7 +46,7 @@ class FFmpegMedia:
         available = bool(shutil.which(self.ffmpeg))
         subtitle = False
         if available:
-            result = subprocess.run([self.ffmpeg, "-hide_banner", "-filters"], capture_output=True, text=True, timeout=10)
+            result = subprocess.run([self.ffmpeg, "-hide_banner", "-filters"], capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
             subtitle = " ass " in result.stdout or " subtitles " in result.stdout
         return {"ffmpeg": available, "ffprobe": bool(shutil.which(self.ffprobe)), "subtitle_burn": subtitle}
 

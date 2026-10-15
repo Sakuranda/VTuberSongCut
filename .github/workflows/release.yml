@@ -1,0 +1,215 @@
+name: Desktop release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional version tag to create after every platform and source check passes; empty builds artifacts only'
+        required: false
+        default: ''
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.version.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate requested release version
+        id: version
+        shell: python
+        env:
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          import json, os, pathlib, re
+          tag = os.environ.get('REQUESTED_TAG', '')
+          if not tag and os.environ['REF_TYPE'] == 'tag':
+              tag = os.environ['REF_NAME']
+          if tag:
+              assert re.fullmatch(r'v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?', tag), 'Invalid release tag'
+              config = json.loads(pathlib.Path('apps/desktop/src-tauri/tauri.conf.json').read_text())
+              package = json.loads(pathlib.Path('apps/desktop/package.json').read_text())
+              cargo = pathlib.Path('apps/desktop/src-tauri/Cargo.toml').read_text()
+              cargo_version = re.search(r'^version\s*=\s*"([^"]+)"', cargo, re.MULTILINE).group(1)
+              assert tag[1:] == config['version'] == package['version'] == cargo_version, 'Bump desktop package, Cargo and Tauri versions together before releasing'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'release_tag={tag}\n')
+  build:
+    needs: validate
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+            triplet: arm64-osx-songcut
+            bundle: dmg
+            label: macOS-AppleSilicon
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            triplet: x64-windows-songcut
+            bundle: nsis
+            label: Windows-x64
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            triplet: x64-linux-songcut
+            bundle: appimage,deb
+            label: Linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 20ceb8adbf0504d4b0d5e4058a32f9d4fc896391
+          path: work/media/vcpkg
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            apps/web/package-lock.json
+            apps/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Cache source downloads
+        uses: actions/cache@v4
+        with:
+          path: work/media/downloads
+          key: media-downloads-${{ runner.os }}-${{ hashFiles('packaging/vcpkg.json') }}
+      - name: Cache installed media together with its source trees and logs
+        uses: actions/cache@v4
+        with:
+          path: |
+            work/media/installed
+            work/media/vcpkg/buildtrees
+            work/media/build-history
+            work/media/build.log
+          key: media-built-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('packaging/**', 'scripts/build_release_media.py', 'scripts/export_media_sources.py') }}
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf autoconf automake libtool pkg-config nasm
+      - name: macOS media source-build dependencies
+        if: runner.os == 'macOS'
+        run: brew install autoconf automake libtool pkg-config nasm
+      - name: Build controlled media from pinned sources
+        run: python scripts/build_release_media.py --triplet ${{ matrix.triplet }}
+      - name: Python application and freezing tools
+        run: python -m pip install -e "services/studio[dev]" "pyinstaller>=6.16,<7" "numpy>=2,<3" "scipy>=1.14,<2" "tensorboard>=2.18,<3" "requests>=2.32,<3"
+      - name: CPU ML runtime
+        if: runner.os != 'macOS'
+        run: python -m pip install torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+      - name: Apple ML runtime (CPU and MPS)
+        if: runner.os == 'macOS'
+        run: python -m pip install torch==2.8.0 torchaudio==2.8.0
+      - name: Prepare original AutoSlicer with reviewed Apple patch
+        run: python scripts/setup_model.py --skip-checkpoint
+      - name: Build web assets
+        working-directory: apps/web
+        run: npm ci && npm run build
+      - name: Core checks
+        run: python -m pytest services/studio/tests -q
+      - name: Freeze full backend with controlled media only
+        shell: bash
+        run: python scripts/build_desktop_backend.py --ffmpeg "$SONGCUT_BUILD_FFMPEG" --ffprobe "$SONGCUT_BUILD_FFPROBE" --media-build-record work/media/media-build.json
+      - name: Test standalone runtime from clean temporary directory
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            python scripts/smoke_desktop_backend.py apps/desktop/src-tauri/binaries/songcut-backend/songcut-backend.exe
+          else
+            python scripts/smoke_desktop_backend.py apps/desktop/src-tauri/binaries/songcut-backend/songcut-backend
+          fi
+      - name: Build platform installer
+        working-directory: apps/desktop
+        env:
+          NO_STRIP: 'true'
+        run: npm ci && npm run build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
+      - name: Export matching patched media sources, recipes and binary manifest
+        run: python scripts/export_media_sources.py --label ${{ matrix.label }} --prune-build-outputs
+      - name: Collect installers and checksums
+        shell: python
+        env:
+          RELEASE_LABEL: ${{ matrix.label }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          import hashlib, os, pathlib, shutil
+          out = pathlib.Path('release-assets'); out.mkdir(exist_ok=True)
+          label = os.environ['RELEASE_LABEL']
+          assert (out / f'MediaSources-{label}.tar.gz').stat().st_size > 0
+          bundle = pathlib.Path('apps/desktop/src-tauri/target') / os.environ['RELEASE_TARGET'] / 'release/bundle'
+          installers = []
+          for pattern in ('*.dmg', '*.exe', '*.AppImage', '*.deb'):
+              for source in bundle.rglob(pattern):
+                  shutil.copy2(source, out / source.name)
+                  installers.append(source)
+          assert installers, 'Native installer missing'
+          lines = []
+          for source in sorted(out.iterdir()):
+              digest = hashlib.sha256()
+              with source.open('rb') as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                      digest.update(chunk)
+              lines.append(f'{digest.hexdigest()}  {source.name}')
+          (out / f'SHA256SUMS-{label}.txt').write_text('\n'.join(lines) + '\n')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.label }}
+          path: release-assets/*
+          retention-days: 3
+          compression-level: 0
+          if-no-files-found: error
+  publish:
+    needs: [validate, build]
+    if: needs.validate.outputs.release_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: release-assets
+      - name: Verify complete source companions and artifact checksums
+        working-directory: release-assets
+        shell: bash
+        run: |
+          for platform in macOS-AppleSilicon Windows-x64 Linux-x64; do
+            test -s "MediaSources-$platform.tar.gz"
+            test -s "SHA256SUMS-$platform.txt"
+            sha256sum --check "SHA256SUMS-$platform.txt"
+            tar -tzf "MediaSources-$platform.tar.gz" | grep -F 'SOURCE-AND-BINARY-MANIFEST.json'
+          done
+      - name: Publish verified prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          existing_commit=$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha 2>/dev/null || true)
+          if [[ -n "$existing_commit" && "$existing_commit" != "$RELEASE_COMMIT" ]]; then
+            echo "Release tag points to a different commit; refusing to replace its assets" >&2
+            exit 1
+          fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          else
+            gh release create "$RELEASE_TAG" release-assets/* --target "$RELEASE_COMMIT" --generate-notes --prerelease --title "VTuberSongCut $RELEASE_TAG"
+          fi

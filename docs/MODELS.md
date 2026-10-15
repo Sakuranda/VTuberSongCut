@@ -1,16 +1,12 @@
 # 模型、原项目与训练
 
-## 本机原项目在哪里
+## 原项目与文件位置
 
-这台开发机器上的拾歌仓库是 `/path/to/VTuberSongCut`。原项目完整克隆在：
+运行 `scripts/setup_model.py` 后，AutoSlicer 原项目位于拾歌仓库下的 `upstream/AutoSlicer-v2/`。这是独立 Git 仓库，安装脚本基于固定提交创建 `feat/apple-silicon` 分支并应用兼容补丁。训练入口是 `src/train.py`，推理入口是 `src/infer.py`；更多参数见 [原项目 README](https://github.com/anAtheist987/AutoSlicer-v2#readme)。
 
-```text
-/path/to/VTuberSongCut/upstream/AutoSlicer-v2
-```
+训练界面、通用数据准备与模型库由拾歌主仓库提供；独立上游仓库只承载 Apple Silicon 兼容修改。
 
-这是独立的 Git 仓库，当前分支为 `feat/apple-silicon`；保留原项目历史，并加入 Apple Silicon 兼容补丁。不是另一个带训练界面的应用。它的说明在 [原项目 README](https://github.com/anAtheist987/AutoSlicer-v2#readme)，训练入口是 `src/train.py`，推理入口是 `src/infer.py`。
-
-当前共用拾歌根目录的 Python 环境 `.venv`，官方阿梓检查点放在根目录的 `var/models/best.pt`，不在上游目录内。主仓库保存 [固定来源与 SHA-256](../packages/contracts/model-source.json) 和 [兼容补丁](../patches/0001-apple-silicon.patch)；忽略原项目克隆、模型、录播及训练产物。
+默认共用拾歌根目录的 Python 环境 `.venv`，官方阿梓检查点位于 `var/models/best.pt`。主仓库保存 [固定来源与 SHA-256](../packages/contracts/model-source.json) 和 [兼容补丁](../patches/0001-apple-silicon.patch)；原项目克隆、模型、录播及训练产物均被 Git 忽略。安装与配置参见 [开发指南](DEVELOPMENT.md)。
 
 ## 在拾歌里选择或导入模型
 
@@ -18,7 +14,7 @@
 
 1. 打开或新建录播项目。
 2. 在模型选择处选择预置阿梓模型，或先到“模型训练 → 我的模型”导入自己的兼容模型。
-3. 选择运行设备并保存项目；这台 Apple Silicon Mac 可用 `mps`，也可用 `cpu`；`auto` 由运行环境选择可用设备。
+3. 选择运行设备并保存项目；Apple Silicon 环境支持时可用 `mps`，也可用 `cpu`；`auto` 由运行环境选择可用设备。
 4. 运行检测，检查并微调歌曲片段，再通过拾歌导出。
 
 导入接受 `.pt` / `.pth`，但扩展名相同并不代表模型兼容。必须是 AutoSlicer 格式的检查点，包含模型参数和建模配置；目前支持 log-mel 输入的 CRNN / TCN，输出为二分类，或多分类中第 1 类代表“目标主播唱歌”。不支持 PANNs / embedding 输入、任意 PyTorch 模型或 RVC 音色模型。声线名称是人工说明，程序不会从权重可靠推断主播身份。
@@ -32,17 +28,16 @@
 下面命令从拾歌根目录运行，使用已准备好的环境、模型和本地录播。把输入路径改成自己的真实文件：
 
 ```sh
-cd /path/to/VTuberSongCut
 .venv/bin/python upstream/AutoSlicer-v2/src/infer.py \
-  --device mps \
-  --input "/绝对路径/录播.flv" \
+  --device auto \
+  --input "var/media/recording.flv" \
   --checkpoint var/models/best.pt \
   --out-dir var/manual-inference
 ```
 
-输出包括 `录播.segments.json` 的时间区间和 `录播.probs.npy` 的逐帧概率。输入是阿梓以外的主播时，应换用针对该主播训练的兼容检查点；官方阿梓检测器不代表通用主播模型。
+输出包括 `recording.segments.json` 的时间区间和 `recording.probs.npy` 的逐帧概率。输入是阿梓以外的主播时，应换用针对该主播训练的兼容检查点；官方阿梓检测器不代表通用主播模型。
 
-末尾加 `--cut-video` 可让原项目同时切视频。它调用 FFmpeg 流复制，切点受关键帧影响，不能保证逐帧精确；需要校正边界、字幕和重新编码导出时，使用拾歌工作台。`--device cpu` 可改为 CPU；明确请求不可用设备会报错。原项目还支持 B 站链接，参数与下载说明见其 README。
+末尾加 `--cut-video` 可让原项目同时切视频。它调用 FFmpeg 流复制，切点受关键帧影响，不能保证逐帧精确；需要校正边界、字幕和重新编码导出时，使用拾歌工作台。`--device mps` 可在受支持的 Apple Silicon 环境使用 MPS，`--device cpu` 可改为 CPU；明确请求不可用设备会报错。原项目还支持 B 站链接，参数与下载说明见其 README。
 
 ## 在拾歌训练自己的主播检测器
 
@@ -56,7 +51,7 @@ cd /path/to/VTuberSongCut
 
 模型库区分预配置、导入、训练三种来源。阿梓预配置模型只适合相应目标，用作现成参考，不会自动适配任意主播。自己的训练结果也只反映给定素材和标注：验证分数不等于真实歌切质量保证，仍需检查误切、漏歌与边界。
 
-没有自己的真实素材与标注，不能完成自己的主播模型训练。**当前尚未用用户真实标注录播训练或评估新主播模型**；合成输入的两步 MPS 训练与完整 HTTP 流程检查只验证执行链路。
+训练自己的主播模型需要相应的真实素材与完整标注。合成输入的训练和 HTTP 流程检查仅验证执行链路；评估模型质量必须使用独立的真实录播。
 
 训练数据和任务产物保存在根目录 `var/training/`；任务保存数据集与设置快照。服务重启后运行中的任务标为中断，需要重新发起。当前按“目标演唱 / 其余”训练，标记其他歌手用于明确负例，不另行训练歌手身份分类或歌名识别。
 
@@ -64,10 +59,10 @@ cd /path/to/VTuberSongCut
 
 不通过拾歌界面时，需要自行准备特征、标签与训练/验证清单。原项目 `scripts/cache_fullband.py`、`scripts/gold_azusa.py` 和 `scripts/build_v2_labels.py` 是参考脚本，包含写死的主播目录、录播编号和既有缓存假设，直接运行不会生成自己的可用数据集。`gold_azusa.py` 读取带 `Name` / `Start` / `Duration` 列的制表符分隔标注，并依赖已有负例清单。拾歌训练工作区已经在主仓库完成通用数据准备，无需修改这些原项目脚本。
 
-准备好四类标签及 `data/processed/v2_train.json`、`data/processed/v2_val.json` 后，下面是本机 MPS 训练与验证命令。注意先进入原项目，再使用根目录的共享环境：
+准备好四类标签及 `data/processed/v2_train.json`、`data/processed/v2_val.json` 后，下面给出 MPS 训练与验证示例；需要受支持的 Apple Silicon 环境。其他设备可按实际环境将 `mps` 改为 `cpu` 或 `cuda`。从拾歌根目录进入原项目，使用根目录的共享环境：
 
 ```sh
-cd /path/to/VTuberSongCut/upstream/AutoSlicer-v2
+cd upstream/AutoSlicer-v2
 ../../.venv/bin/python src/train.py \
   --device mps --model crnn --run-name my_streamer_mps \
   --classes 4 --batch-size 2 --num-workers 0 \
@@ -83,4 +78,4 @@ cd /path/to/VTuberSongCut/upstream/AutoSlicer-v2
 
 该示例要求第 1 类为目标主播唱歌，其他类别沿用原项目四类定义；只有二分类标签时应采用相应二分类配置，不能仅把 `--classes` 改成 4。训练完成后，将 `upstream/AutoSlicer-v2/runs/my_streamer_mps/best.pt` 导入拾歌，再用未参与训练的真实录播检查。
 
-MPS 训练的神经网络使用 FP32；频谱特征在 CPU 计算后传入 MPS。先用小 batch 检查内存和训练行为，再按素材增加规模。原项目的 Demucs 自监督数据工厂与 PANNs 实验路径尚未完成 MPS 适配，不能据此承诺在这台 Mac 上一键冷启动训练。
+MPS 训练的神经网络使用 FP32；频谱特征在 CPU 计算后传入 MPS。先用小 batch 检查内存和训练行为，再按素材增加规模。原项目的 Demucs 自监督数据工厂与 PANNs 实验路径尚未完成 MPS 适配，不属于当前支持的 MPS 训练流程。

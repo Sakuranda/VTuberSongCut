@@ -7,5 +7,6 @@
     "web:build": "npm --prefix apps/web run build",
     "desktop:dev": "npm --prefix apps/desktop run dev",
     "desktop:build": "npm --prefix apps/desktop run build"
-  }
+  },
+  "license": "MIT"
 }

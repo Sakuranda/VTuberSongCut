@@ -1,0 +1,5 @@
+{$SONGCUT_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy songcut:8765
+    header Strict-Transport-Security "max-age=31536000"
+}

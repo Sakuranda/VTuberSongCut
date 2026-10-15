@@ -1,0 +1,27 @@
+name: songcut
+services:
+  songcut:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: songcut-server:local
+    restart: unless-stopped
+    environment:
+      SONGCUT_SERVER: "1"
+      SONGCUT_HOST: "0.0.0.0"
+      SONGCUT_DATA: /data
+      SONGCUT_DEVICE: cpu
+      SONGCUT_PUBLIC_ORIGIN: ${SONGCUT_PUBLIC_ORIGIN:-http://localhost:8765}
+      SONGCUT_SERVER_USERNAME: ${SONGCUT_SERVER_USERNAME:?Run scripts/deploy.sh to generate server credentials}
+      SONGCUT_SERVER_PASSWORD: ${SONGCUT_SERVER_PASSWORD:?Run scripts/deploy.sh to generate server credentials}
+    ports:
+      - "${SONGCUT_BIND:-127.0.0.1}:${SONGCUT_HTTP_PORT:-8765}:8765"
+    volumes:
+      - songcut-data:/data
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  songcut-data:

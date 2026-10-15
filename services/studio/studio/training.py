@@ -17,6 +17,7 @@ from threading import RLock
 from uuid import uuid4
 
 from .store import ConflictError
+from .runtime import worker_command
 
 OUT_FPS = 3.125
 SCOPE = "target-vs-rest"
@@ -303,10 +304,9 @@ class TrainingService:
                     environment.setdefault("AUTOSLICER_FFMPEG", imageio_ffmpeg.get_ffmpeg_exe())
                 except ImportError:
                     pass
-                options = {"start_new_session": True} if os.name != "nt" else {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+                options = {"start_new_session": True} if os.name != "nt" else {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
                 with (directory / "training.log").open("w", encoding="utf-8") as log:
-                    process = subprocess.Popen([self.settings.model_python or sys.executable, "-u",
-                                                str(Path(__file__).with_name("training_worker.py")), str(directory / "snapshot.json")],
+                    process = subprocess.Popen(worker_command("prepare", [str(directory / "snapshot.json")], python=self.settings.model_python),
                                                cwd=directory, stdout=log, stderr=subprocess.STDOUT, env=environment, **options)
                 self.processes[ident] = process
                 job["pid"] = process.pid
@@ -407,14 +407,14 @@ class TrainingService:
                 else:
                     inspect = ["ps", "-ww", "-p", str(pid), "-o", "command="]
                 command = subprocess.run(inspect, capture_output=True, text=True, timeout=3).stdout
-                if "training_worker.py" in command and str(job["id"]) in command:
+                if ("training_worker.py" in command or "--worker prepare" in command) and str(job["id"]) in command:
                     self._terminate_tree(pid)
                     if os.name != "nt":
                         return self._group_stopped(pid)
                     deadline = time.monotonic() + 5
                     while time.monotonic() < deadline:
                         command = subprocess.run(inspect, capture_output=True, text=True, timeout=3).stdout
-                        if "training_worker.py" not in command or str(job["id"]) not in command:
+                        if ("training_worker.py" not in command and "--worker prepare" not in command) or str(job["id"]) not in command:
                             return True
                         time.sleep(.05)
                     return False

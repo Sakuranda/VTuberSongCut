@@ -1,10 +1,15 @@
 """Reproduce the pinned upstream checkout + reviewable patch; never overwrite a checkout."""
 from pathlib import Path
+import argparse
+import sys
 import hashlib
 import json
 import subprocess
 import urllib.request
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--skip-checkpoint", action="store_true", help="prepare upstream code without downloading model weights")
+args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
 manifest = json.loads((root / "packages/contracts/model-source.json").read_text(encoding="utf-8"))
 repo = root / "upstream/AutoSlicer-v2"
@@ -13,7 +18,10 @@ if repo.exists():
 repo.parent.mkdir(parents=True, exist_ok=True)
 subprocess.run(["git", "clone", manifest["repository"], str(repo)], check=True)
 subprocess.run(["git", "switch", "-c", "feat/apple-silicon", manifest["base_commit"]], cwd=repo, check=True)
-subprocess.run(["git", "am", str(root / "patches/0001-apple-silicon.patch")], cwd=repo, check=True)
+subprocess.run(["git", "-c", "user.name=VTuber SongCut Build", "-c", "user.email=build@vtubersongcut.invalid", "am", str(root / "patches/0001-apple-silicon.patch")], cwd=repo, check=True)
+if args.skip_checkpoint:
+    print(f"上游代码与兼容补丁已准备：{repo}")
+    sys.exit(0)
 model = root / "var/models/best.pt"
 model.parent.mkdir(parents=True, exist_ok=True)
 if not model.exists():

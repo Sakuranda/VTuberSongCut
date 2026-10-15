@@ -11,6 +11,7 @@ from uuid import uuid4
 from pydantic import Field
 from .domain import Record
 from .config import Settings
+from .runtime import worker_command
 from .store import Store
 
 MAX_MODEL_BYTES = 256 * 1024 * 1024
@@ -53,14 +54,13 @@ class ModelLibrary:
             db.execute("CREATE TABLE IF NOT EXISTS models (id TEXT PRIMARY KEY, path TEXT NOT NULL, info TEXT NOT NULL)")
 
     def probe(self, checkpoint: Path | None = None) -> dict:
-        command = [self.config.model_python or sys.executable, str(Path(__file__).with_name("model_probe.py")),
-                   "--repository", str(self.config.upstream)]
+        command = worker_command("probe", [], repository=self.config.upstream, python=self.config.model_python)
         if checkpoint:
             command += ["--checkpoint", str(checkpoint)]
         environment = {**os.environ, "PYTHONUTF8": "1"}
         try:
             result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                                    env=environment, timeout=90)
+                                    env=environment, timeout=90, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ValueError("无法启动模型环境，请检查模型 Python 和 AutoSlicer 安装") from exc
         try:
