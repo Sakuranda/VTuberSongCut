@@ -63,11 +63,20 @@ def main():
         if isinstance(report, dict):
             assert report['commit'] == commit and str(report['run_id']) == run_id
         for asset in directory.iterdir():
-            assert asset.is_file() and not (output / asset.name).exists(), 'Unexpected or duplicate release asset'
-            shutil.copy2(asset, output / asset.name)
+            # GitHub replaces spaces with dots in uploaded release filenames.
+            # Normalize explicitly so downloaded files match their checksum list.
+            destination = output / asset.name.replace(' ', '.')
+            assert asset.is_file() and not destination.exists(), 'Unexpected or duplicate release asset'
+            if asset.name.startswith('SHA256SUMS-'):
+                lines = [line.split('  ', 1) for line in asset.read_text().splitlines()]
+                destination.write_text(''.join(digest + '  ' + name.replace(' ', '.') + '\n' for digest, name in lines))
+            else:
+                shutil.copy2(asset, destination)
         evidence['platforms'].append({'platform': label, 'run_id': run_id, 'build_commit': commit,
                                      'workflow_url': metadata['html_url'], 'artifact_id': matches[0]['id'],
-                                     'application_sources_match_release': True, 'assets': verified['assets']})
+                                     'application_sources_match_release': True,
+                                     'artifact_asset_names': verified['assets'],
+                                     'assets': {name.replace(' ', '.'): digest for name, digest in verified['assets'].items()}})
     provenance = output / 'RELEASE-PROVENANCE.json'
     provenance.write_text(json.dumps(evidence, indent=2) + '\n')
     (output / 'SHA256SUMS-PROVENANCE.txt').write_text(hashlib.sha256(provenance.read_bytes()).hexdigest() + '  ' + provenance.name + '\n')

@@ -47,9 +47,9 @@ Visit **[Releases](https://github.com/Sakuranda/VTuberSongCut/releases)** and do
 
 | Platform | Package |
 | --- | --- |
-| macOS 15+ · Apple Silicon | [Download DMG](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber%20SongCut_0.1.0_aarch64.dmg) |
-| Windows · x64 | [Download EXE](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber%20SongCut_0.1.0_x64-setup.exe) |
-| Linux · x64 | [Download AppImage](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber%20SongCut_0.1.0_amd64.AppImage) / [Download DEB](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber%20SongCut_0.1.0_amd64.deb) |
+| macOS 15+ · Apple Silicon | [Download DMG](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber.SongCut_0.1.0_aarch64.dmg) |
+| Windows · x64 | [Download EXE](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber.SongCut_0.1.0_x64-setup.exe) |
+| Linux · x64 | [Download AppImage](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber.SongCut_0.1.0_amd64.AppImage) / [Download DEB](https://github.com/Sakuranda/VTuberSongCut/releases/download/v0.1.0/VTuber.SongCut_0.1.0_amd64.deb) |
 
 Install the app, import a recording, and select the performer's model. On first use, open **Model Training** to train your own detector or import a compatible model. Performer weights are not included in the installers; see the [model guide](docs/MODELS.md).
 
