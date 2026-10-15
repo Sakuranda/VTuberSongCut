@@ -90,9 +90,9 @@ def main():
         lines.append(f"- {entry['platform']}: [{entry['build_commit'][:7]}]({entry['workflow_url']})")
     lines += ['', 'SHA256SUMS 文件用于校验下载。MediaSources 附件包含对应 FFmpeg 及依赖的源码、补丁和构建记录，普通用户运行软件无需下载；再分发时请同时保留匹配源码与第三方许可证。', '']
     notes.write_text('\n'.join(lines))
-    existing = subprocess.run(['gh', 'api', f'repos/{repo}/commits/{tag}', '--jq', '.sha'], capture_output=True, text=True)
+    existing = subprocess.run(['gh', 'api', f'repos/{repo}/git/ref/tags/{tag}'], capture_output=True, text=True)
     if existing.returncode == 0:
-        assert existing.stdout.strip() == target, 'Existing tag has a different commit'
+        assert api(f'repos/{repo}/commits/{tag}')['sha'] == target, 'Existing tag has a different commit'
     elif 'HTTP 404' not in existing.stderr:
         raise RuntimeError('Could not safely determine release tag state: ' + existing.stderr)
     assets = [str(path) for path in sorted(output.iterdir())]
