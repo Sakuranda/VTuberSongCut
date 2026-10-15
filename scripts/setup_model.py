@@ -6,7 +6,7 @@ import subprocess
 import urllib.request
 
 root = Path(__file__).resolve().parents[1]
-manifest = json.loads((root / "packages/contracts/model-source.json").read_text())
+manifest = json.loads((root / "packages/contracts/model-source.json").read_text(encoding="utf-8"))
 repo = root / "upstream/AutoSlicer-v2"
 if repo.exists():
     raise SystemExit(f"目录已存在，未覆盖：{repo}。检查后手动使用，或将其移开再执行。")

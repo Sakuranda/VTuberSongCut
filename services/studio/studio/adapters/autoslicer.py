@@ -23,11 +23,12 @@ class AutoSlicerDetector:
         # Separate interpreter keeps upstream's flat module names out of the application.
         environment = os.environ.copy()
         environment["AUTOSLICER_FFMPEG"] = self.ffmpeg
-        with (output / "detector.log").open("w") as log:
+        environment["PYTHONUTF8"] = "1"
+        with (output / "detector.log").open("w", encoding="utf-8") as log:
             result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=6*3600, env=environment)
         if result.returncode:
             raise RuntimeError("检测失败，请查看任务目录中的 detector.log")
-        data = json.loads((output / f"{source.stem}.segments.json").read_text())
+        data = json.loads((output / f"{source.stem}.segments.json").read_text(encoding="utf-8"))
         clips = []
         for segment in data["segments"]:
             start = max(0, round(segment["cut_start"] * 1000))

@@ -337,7 +337,7 @@ def test_export_job_uses_immutable_project_snapshot_while_user_edits(tmp_path):
     assert store.get(original.id).revision == 1
     persisted = store.get_job(job.id)
     assert persisted.status == "succeeded" and persisted.input_revision == 0
-    snapshot = Project.model_validate_json((tmp_path / "jobs" / job.id / "project.snapshot.json").read_text())
+    snapshot = Project.model_validate_json((tmp_path / "jobs" / job.id / "project.snapshot.json").read_text(encoding="utf-8"))
     assert snapshot.clips[0] == original_clip
     assert snapshot.source_fps == 29.97 and snapshot.revision == 0
 
