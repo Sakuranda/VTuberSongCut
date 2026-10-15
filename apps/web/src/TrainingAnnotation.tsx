@@ -142,6 +142,88 @@ export function TrainingAnnotation({
     });
     setError("");
   }
+  function markBoundary(edge: "start" | "end") {
+    const position = Math.max(
+      0,
+      Math.min(
+        sample.duration_ms,
+        Math.round((video.current?.currentTime ?? now / 1000) * 1000),
+      ),
+    );
+    if (edge === "start") setStart(position);
+    else setEnd(position);
+  }
+  useEffect(() => {
+    function shortcuts(event: KeyboardEvent) {
+      const target = event.target instanceof Element ? event.target : null;
+      const player = video.current;
+      if (
+        !active ||
+        disabled ||
+        !player ||
+        player.readyState < 1 ||
+        player.error ||
+        showCompatibility ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.keyCode === 229 ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        target?.closest(
+          'input, textarea, select, button, a, summary, [role="textbox"], [role="combobox"], [contenteditable]:not([contenteditable="false"])',
+        ) ||
+        document.querySelector(
+          'dialog[open], [aria-modal="true"], [role="dialog"]',
+        )
+      )
+        return;
+
+      const key = event.key.toLowerCase();
+      const arrow = event.key === "ArrowLeft" || event.key === "ArrowRight";
+      const toggle = event.code === "Space" || event.key === " " || key === "k";
+      if (!arrow && !toggle && !["i", "o", "a"].includes(key)) return;
+      // Capture before native video shortcuts to avoid double seeks/toggles.
+      event.preventDefault();
+      if (event.repeat && !arrow) return;
+      if (arrow) {
+        player.pause();
+        seek(
+          player.currentTime * 1000 +
+            (event.key === "ArrowLeft" ? -1 : 1) *
+              (event.shiftKey ? 10000 : 1000),
+        );
+      } else if (toggle) {
+        if (player.paused)
+          void player
+            .play()
+            .catch(() =>
+              setError("无法开始播放，请点击播放器中的播放按钮重试。"),
+            );
+        else player.pause();
+      } else if (key === "i" || key === "o") {
+        markBoundary(key === "i" ? "start" : "end");
+      } else if (Object.values(invalid).some(Boolean)) {
+        setError("请先修正开始或结束时间，再添加标注。");
+      } else {
+        addRegion();
+      }
+    }
+    window.addEventListener("keydown", shortcuts, { capture: true });
+    return () =>
+      window.removeEventListener("keydown", shortcuts, { capture: true });
+  }, [
+    active,
+    disabled,
+    showCompatibility,
+    sample,
+    start,
+    end,
+    label,
+    invalid,
+    now,
+    onChange,
+  ]);
   return (
     <div className="training-annotation">
       <div className="training-preview">
@@ -150,6 +232,8 @@ export function TrainingAnnotation({
           key={`${sample.id}-${version}`}
           src={`${api.trainingMedia(dataset.id, sample.id)}?preview=${version}`}
           controls
+          aria-label="训练素材预览"
+          tabIndex={0}
           preload="metadata"
           onTimeUpdate={(event) =>
             setNow(Math.round(event.currentTarget.currentTime * 1000))
@@ -199,6 +283,34 @@ export function TrainingAnnotation({
           </div>
         )}
       </div>
+      <div
+        className="shortcut-guide training-shortcuts"
+        aria-label="训练视频快捷键"
+      >
+        <span>
+          <kbd>空格</kbd> / <kbd>K</kbd> 播放 / 暂停
+        </span>
+        <span>
+          <kbd>←</kbd>
+          <kbd>→</kbd> 前后 1 秒
+        </span>
+        <span>
+          <kbd>Shift</kbd> + <kbd>←</kbd>
+          <kbd>→</kbd> 前后 10 秒
+        </span>
+        <span>
+          <kbd>I</kbd> 标记开始
+        </span>
+        <span>
+          <kbd>O</kbd> 标记结束
+        </span>
+        <span>
+          <kbd>A</kbd> 添加这段标注
+        </span>
+      </div>
+      <p className="training-shortcut-note">
+        点击视频或时间轴后使用；输入框内按键用于输入。添加标注后仍需保存。
+      </p>
       <p className="training-hint preview-explanation">
         {hasPreview
           ? "正在使用兼容预览，训练仍使用原始素材。"
@@ -260,15 +372,10 @@ export function TrainingAnnotation({
         aria-valuemax={sample.duration_ms}
         aria-valuenow={now}
         aria-valuetext={format(now)}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-            event.preventDefault();
-            seek(now + (event.key === "ArrowRight" ? 1 : -1) * 1000);
-          }
-        }}
         onPointerDown={(event) => {
           if (disabled || event.button !== 0) return;
           event.preventDefault();
+          event.currentTarget.focus();
           event.currentTarget.setPointerCapture(event.pointerId);
           const ms = pointerTime(event);
           dragStart.current = ms;
@@ -334,7 +441,8 @@ export function TrainingAnnotation({
           <button
             className="text-action"
             disabled={disabled}
-            onClick={() => setStart(now)}
+            aria-keyshortcuts="I"
+            onClick={() => markBoundary("start")}
           >
             用当前播放位置作开始
           </button>
@@ -355,7 +463,8 @@ export function TrainingAnnotation({
           <button
             className="text-action"
             disabled={disabled}
-            onClick={() => setEnd(now)}
+            aria-keyshortcuts="O"
+            onClick={() => markBoundary("end")}
           >
             用当前播放位置作结束
           </button>
@@ -377,6 +486,7 @@ export function TrainingAnnotation({
         </label>
         <button
           className="button primary"
+          aria-keyshortcuts="A"
           disabled={
             disabled || Object.values(invalid).some(Boolean) || start >= end
           }
