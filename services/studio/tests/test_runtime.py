@@ -39,3 +39,22 @@ def test_resource_root_environment_override(monkeypatch, tmp_path):
     monkeypatch.setenv("SONGCUT_ROOT", str(tmp_path))
     assert runtime.resource_root() == tmp_path
     assert Settings.load().upstream == tmp_path / "upstream/AutoSlicer-v2"
+
+
+def test_gui_launch_without_standard_handles_still_configures_logging(monkeypatch):
+    from studio.launcher import configure_stdio
+    from uvicorn.logging import DefaultFormatter
+    streams = []
+    try:
+        with monkeypatch.context() as context:
+            context.setattr(sys, "stdout", None)
+            context.setattr(sys, "stderr", None)
+            configure_stdio()
+            streams = [sys.stdout, sys.stderr]
+            assert all(stream is not None and not stream.isatty() for stream in streams)
+            # This previously raised AttributeError on stdout=None.
+            formatter = DefaultFormatter()
+            assert formatter.use_colors is False
+    finally:
+        for stream in streams:
+            stream.close()

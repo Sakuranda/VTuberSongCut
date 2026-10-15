@@ -172,15 +172,29 @@ def test_known_system_shims_are_recipe_only_on_linux_but_windows_keeps_real_sour
     state, _, _ = media_state
     status = state / "installed/vcpkg/status"
     with status.open("a") as output:
-        for port in ("pthread", "pthreads", "libiconv"):
+        for port in ("pthread", "pthreads", "libiconv", "dirent"):
             output.write(f"\n\nPackage: {port}\nArchitecture: platform\nStatus: install ok installed")
     record_path = state / "media-build.json"
     record = json.loads(record_path.read_text())
     record["triplet"] = "x64-linux-songcut"
     record_path.write_text(json.dumps(record))
     _, _, _, recipe_only, _ = exporter.inspect_source_inputs(state)
-    assert {"pthread", "pthreads", "libiconv"} <= recipe_only
+    assert {"pthread", "pthreads", "libiconv", "dirent"} <= recipe_only
     record["triplet"] = "x64-windows-songcut"
     record_path.write_text(json.dumps(record))
     with pytest.raises(ValueError, match="Installed packages lack source coverage"):
         exporter.inspect_source_inputs(state)
+
+
+def test_verified_cache_can_be_reused_after_later_app_step_fails(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    waiter = importlib.import_module("wait_for_media_cache")
+    job = {"name": "build (Windows-x64)", "status": "completed", "conclusion": "failure", "steps": [
+        {"name": waiter.PREPARE, "conclusion": "success"},
+        {"name": waiter.SAVE, "conclusion": "success"},
+        {"name": "Freeze full backend", "conclusion": "failure"}]}
+    assert waiter.cache_state([job]) == "ready"
+    job["steps"][1]["conclusion"] = "skipped"
+    assert waiter.cache_state([job]) == "ready"
+    job["steps"][0]["conclusion"] = "failure"
+    assert waiter.cache_state([job]) == "failed"

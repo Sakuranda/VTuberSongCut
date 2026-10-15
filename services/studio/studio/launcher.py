@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import multiprocessing
+import os
 from pathlib import Path
 import runpy
 import sys
@@ -9,12 +10,22 @@ import sys
 from studio.runtime import configure_runtime, resource_root
 
 
+def configure_stdio():
+    # A GUI process on Windows can inherit no standard handles. Uvicorn's
+    # formatter still calls stdout.isatty(), so provide real null streams.
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name)
+        if stream is None:
+            stream = open(os.devnull, "w", encoding="utf-8")
+            setattr(sys, name, stream)
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main():
     # Required before argument dispatch: torch DataLoader may spawn frozen Python.
     multiprocessing.freeze_support()
-    for stream in (sys.stdout, sys.stderr):
-        if stream is not None and hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8", errors="replace")
+    configure_stdio()
     configure_runtime()
     if len(sys.argv) > 1 and sys.argv[1] == "--worker":
         kind, args = sys.argv[2], sys.argv[3:]
@@ -40,7 +51,6 @@ def main():
         print(json.dumps({"resources": str(resource_root()), "data": str(settings.data),
                           "upstream": str(settings.upstream)}))
         return
-    import os
     import threading
     import time
     import uvicorn

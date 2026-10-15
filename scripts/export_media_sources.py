@@ -75,7 +75,7 @@ def inspect_source_inputs(state: Path):
     # The pinned non-Windows ports are empty shims over the platform iconv/pthreads.
     # Windows MSVC builds those libraries and must retain their actual source.
     if record["triplet"].startswith(("x64-linux", "arm64-osx")):
-        recipe_only.update((ports - trees.keys()) & {"libiconv", "pthreads"})
+        recipe_only.update((ports - trees.keys()) & {"libiconv", "pthreads", "dirent"})
     missing = ports - trees.keys() - recipe_only
     if missing:
         raise ValueError(f"Installed packages lack source coverage: {sorted(missing)}")

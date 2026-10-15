@@ -9,8 +9,14 @@ on:
         required: false
         default: ''
         type: string
+      reuse_media_run:
+        description: 'Optional existing run whose verified Windows media cache should be reused; other platforms start immediately'
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: desktop-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: false
@@ -26,10 +32,12 @@ jobs:
         shell: python
         env:
           REQUESTED_TAG: ${{ inputs.release_tag }}
+          REUSE_MEDIA_RUN: ${{ inputs.reuse_media_run }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           import json, os, pathlib, re
+          assert not os.environ.get('REUSE_MEDIA_RUN') or os.environ['REUSE_MEDIA_RUN'].isdecimal(), 'Invalid media source run ID'
           tag = os.environ.get('REQUESTED_TAG', '')
           if not tag and os.environ['REF_TYPE'] == 'tag':
               tag = os.environ['REF_NAME']
@@ -45,6 +53,9 @@ jobs:
   build:
     needs: validate
     timeout-minutes: 90
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
     strategy:
       fail-fast: false
       matrix:
@@ -86,6 +97,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: Reuse an existing verified Windows media build
+        if: runner.os == 'Windows' && inputs.reuse_media_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REUSE_MEDIA_RUN: ${{ inputs.reuse_media_run }}
+        shell: bash
+        run: python scripts/wait_for_media_cache.py --run "$REUSE_MEDIA_RUN"
       - name: Cache source downloads
         uses: actions/cache@v4
         with:
