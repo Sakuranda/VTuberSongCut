@@ -326,7 +326,8 @@ export const api = {
       revision: dataset.revision,
       settings,
     }),
-  trainingJobs: () => request<TrainingJob[]>("/training/jobs"),
+  trainingJobs: (signal?: AbortSignal) =>
+    request<TrainingJob[]>("/training/jobs", { signal }),
   cancelTraining: (id: string) =>
     post<TrainingJob>(`/training/jobs/${id}/cancel`),
   models: () => request<ModelCatalog>("/models"),
@@ -337,11 +338,13 @@ export const api = {
     return request<ModelInfo>("/models/upload", { method: "POST", body });
   },
   projects: () => request<Project[]>("/projects"),
-  project: (id: string) => request<Project>(`/projects/${id}`),
+  project: (id: string, signal?: AbortSignal) =>
+    request<Project>(`/projects/${id}`, { signal }),
   capabilities: () => request<Capabilities>("/capabilities"),
-  jobs: (projectId?: string) =>
+  jobs: (projectId?: string, signal?: AbortSignal) =>
     request<Job[]>(
       `/jobs${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`,
+      { signal },
     ),
   upload: (file: File, onProgress?: (progress: UploadProgress) => void) => {
     const body = new FormData();

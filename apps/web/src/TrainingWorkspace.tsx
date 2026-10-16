@@ -10,6 +10,7 @@ import type {
   TrainingSettings,
 } from "./api";
 import { TrainingAnnotation } from "./TrainingAnnotation";
+import { usePolling } from "./usePolling";
 import { UploadFeedback } from "./UploadFeedback";
 import type { FileUploadState } from "./UploadFeedback";
 
@@ -202,27 +203,21 @@ export function TrainingWorkspace({
       if (!settled) loaded.current = false;
     };
   }, [active]);
-  useEffect(() => {
-    let stopped = false;
-    async function poll() {
+  usePolling(
+    async (signal) => {
       try {
-        const items = await api.trainingJobs();
-        if (!stopped) {
+        const items = await api.trainingJobs(signal);
+        if (!signal.aborted) {
           setJobs(items);
           setPollError("");
         }
       } catch {
-        if (!stopped)
-          setPollError("暂时无法更新训练进度，正在重试。已保存的标注会保留。");
+        if (!signal.aborted) setPollError("无法更新训练进度，正在重试。");
       }
-    }
-    void poll();
-    const timer = window.setInterval(poll, 2500);
-    return () => {
-      stopped = true;
-      window.clearInterval(timer);
-    };
-  }, []);
+    },
+    active,
+    running ? 2500 : 10000,
+  );
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
       if (dirtyRef.current) event.preventDefault();

@@ -25,6 +25,7 @@ import { TrainingWorkspace } from "./TrainingWorkspace";
 import { UploadFeedback } from "./UploadFeedback";
 import type { FileUploadState } from "./UploadFeedback";
 import { OperationProgress } from "./OperationProgress";
+import { usePolling } from "./usePolling";
 import "./styles.css";
 import "./training.css";
 
@@ -194,8 +195,14 @@ function App() {
     );
   }
   useEffect(() => {
-    void refreshCatalog();
-  }, []);
+    const refreshVisibleCatalog = () => {
+      if (!document.hidden) void refreshCatalog();
+    };
+    refreshVisibleCatalog();
+    document.addEventListener("visibilitychange", refreshVisibleCatalog);
+    return () =>
+      document.removeEventListener("visibilitychange", refreshVisibleCatalog);
+  }, [workspace]);
   const fps = editingFps(project?.source_fps);
   const output = clip?.export_settings || DEFAULT_EXPORT_SETTINGS;
   const outputLabel =
@@ -255,13 +262,11 @@ function App() {
       stopped = true;
     };
   }, []);
-  useEffect(() => {
-    let stopped = false;
-    async function poll() {
+  usePolling(
+    async (signal) => {
       try {
-        const items = await api.jobs();
-        if (stopped) return;
-        setJobs(items);
+        const items = await api.jobs(live.current.project?.id, signal);
+        if (signal.aborted) return;
         const p = live.current.project;
         const changed =
           p &&
@@ -273,28 +278,30 @@ function App() {
                 (old) => old.id === j.id && old.status !== "succeeded",
               ),
           );
-        previousJobs.current = items;
         if (changed && p) {
           if (live.current.dirty || live.current.busy) setRefreshPending(true);
           else {
-            const fresh = await api.project(p.id);
-            if (!stopped && live.current.project?.id === fresh.id) {
+            const fresh = await api.project(p.id, signal);
+            if (!signal.aborted && live.current.project?.id === fresh.id) {
               if (!live.current.dirty && !live.current.busy) accept(fresh);
               else setRefreshPending(true);
             }
           }
         }
+        // Publish the new job status after refreshing the project. Changing the
+        // active/idle polling interval earlier would abort this same refresh.
+        if (!signal.aborted) {
+          previousJobs.current = items;
+          setJobs(items);
+        }
       } catch {
         /* Keep editing available during a temporary polling failure. */
       }
-    }
-    void poll();
-    const timer = window.setInterval(poll, 2000);
-    return () => {
-      stopped = true;
-      window.clearInterval(timer);
-    };
-  }, []);
+    },
+    workspace === "cut" && !!project,
+    processing ? 2000 : 10000,
+    project?.id,
+  );
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
       if (live.current.dirty || live.current.busy.includes("导入"))

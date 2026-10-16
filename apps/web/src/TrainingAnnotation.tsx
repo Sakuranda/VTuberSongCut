@@ -9,6 +9,7 @@ import type {
 import { formatTimecode as format } from "./editing";
 import { TimecodeInput } from "./TimecodeInput";
 import { OperationProgress } from "./OperationProgress";
+import { usePolling } from "./usePolling";
 
 export function TrainingAnnotation({
   active,
@@ -43,14 +44,11 @@ export function TrainingAnnotation({
   useEffect(() => {
     if (!active) video.current?.pause();
   }, [active]);
-  useEffect(() => {
-    let stopped = false;
-    let timer: number | undefined;
-    async function poll() {
-      let retry = false;
+  usePolling(
+    async (signal) => {
       try {
-        const jobs = await api.jobs(`training-media:${sample.id}`);
-        if (stopped) return;
+        const jobs = await api.jobs(`training-media:${sample.id}`, signal);
+        if (signal.aborted) return false;
         const current = jobs.find(
           (job) =>
             job.project_id === `training-media:${sample.id}` &&
@@ -59,32 +57,24 @@ export function TrainingAnnotation({
         setPollError("");
         if (current) {
           setPreview(current);
-          retry = ["queued", "running"].includes(current.status);
           if (current.status === "succeeded") {
             setVersion(current.id);
             setMediaError(false);
             setNetworkError(false);
           }
         }
+        return !!current && ["queued", "running"].includes(current.status);
       } catch {
-        if (!stopped)
-          setPollError(
-            "暂时无法读取预览进度，正在重试。后台任务不会因此停止，请勿重复提交。",
-          );
-        retry = true;
+        if (!signal.aborted) setPollError("无法更新预览进度，正在重试。");
+        return true;
       } finally {
-        if (!stopped) {
-          setPreviewRestored(true);
-          if (retry) timer = window.setTimeout(poll, 2000);
-        }
+        if (!signal.aborted) setPreviewRestored(true);
       }
-    }
-    void poll();
-    return () => {
-      stopped = true;
-      window.clearTimeout(timer);
-    };
-  }, [dataset.id, sample.id, preview?.id]);
+    },
+    active,
+    2000,
+    `${sample.id}:${preview?.id || ""}`,
+  );
   const waitingPreview =
     previewBusy ||
     (!!preview && ["queued", "running"].includes(preview.status));
