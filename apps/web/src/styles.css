@@ -2018,3 +2018,23 @@ h2 {
     font-size: 18px;
   }
 }
+
+.inspector-note {
+  color: #65758e;
+  font-size: 12px;
+  line-height: 1.8;
+  margin: 0 0 16px;
+}
+.export-extras {
+  width: 100%;
+  color: #65758e;
+  font-size: 11px;
+}
+.export-extras summary {
+  cursor: pointer;
+  padding: 5px 0;
+}
+.export-extras a {
+  display: inline-flex;
+  margin: 8px 8px 0 0;
+}

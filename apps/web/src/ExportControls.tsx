@@ -3,28 +3,31 @@ import type { ExportSettings } from "./api";
 interface Props {
   value: ExportSettings;
   disabled: boolean;
+  hasVideo?: boolean;
   onChange: (value: ExportSettings) => void;
 }
-export function ExportControls({ value, disabled, onChange }: Props) {
+export function ExportControls({
+  value,
+  disabled,
+  onChange,
+  hasVideo = true,
+}: Props) {
   const update = (patch: Partial<ExportSettings>) =>
     onChange({ ...value, ...patch });
   return (
     <div className="export-controls">
-      <div className="inspector-intro">
-        <span className="eyebrow">EXPORT SETTINGS</span>
-        <h3>选择这首歌的输出规格。</h3>
-      </div>
       <fieldset className="format-picks" disabled={disabled}>
         <legend>输出文件</legend>
         <label>
           <input
             type="checkbox"
-            checked={value.video}
+            checked={hasVideo && value.video}
+            disabled={!hasVideo}
             onChange={(event) => update({ video: event.target.checked })}
           />
           <span>
             <strong>MP4 视频</strong>
-            <small>画面与声音</small>
+            <small>{hasVideo ? "画面与声音" : "素材仅含音频"}</small>
           </span>
         </label>
         <label>
@@ -44,7 +47,11 @@ export function ExportControls({ value, disabled, onChange }: Props) {
           请至少选择一种输出文件。
         </p>
       )}
-      <fieldset className="video-settings" disabled={disabled || !value.video}>
+      <fieldset
+        className="video-settings"
+        hidden={!hasVideo}
+        disabled={disabled || !value.video || !hasVideo}
+      >
         <legend>视频规格</legend>
         <label className="field">
           视频编码

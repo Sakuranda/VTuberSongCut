@@ -204,7 +204,11 @@ function App() {
       document.removeEventListener("visibilitychange", refreshVisibleCatalog);
   }, [workspace]);
   const fps = editingFps(project?.source_fps);
-  const output = clip?.export_settings || DEFAULT_EXPORT_SETTINGS;
+  const savedOutput = clip?.export_settings || DEFAULT_EXPORT_SETTINGS;
+  const output =
+    project && !project.has_video
+      ? { ...savedOutput, video: false }
+      : savedOutput;
   const outputLabel =
     [output.video && "MP4", output.audio && "MP3"]
       .filter(Boolean)
@@ -458,8 +462,8 @@ function App() {
       setNow(0);
       setNotice(
         pending
-          ? "视频已导入，并选中刚才的模型。保存修改后可开始检测。"
-          : "视频已导入，选择模型后可检测演唱片段，也可手动添加。",
+          ? "录播已导入，并选中刚才的模型。保存修改后可开始检测。"
+          : "录播已导入，可选择模型检测，也可手动添加片段。",
       );
     } catch (e) {
       setUploadState(
@@ -519,7 +523,7 @@ function App() {
       detection: "manual",
       candidates: [],
       lyrics: [],
-      export_settings: { ...DEFAULT_EXPORT_SETTINGS },
+      export_settings: { ...DEFAULT_EXPORT_SETTINGS, video: project.has_video },
       subtitle: {
         enabled: false,
         layout: "single",
@@ -567,7 +571,7 @@ function App() {
               onClick={() => upload.current?.click()}
             >
               <Icon name="upload" size={17} />
-              {busy.includes("导入视频") ? "正在导入…" : "导入视频"}
+              {busy.includes("导入视频") ? "正在导入…" : "导入录播"}
             </button>
             <input
               ref={upload}
@@ -1050,7 +1054,7 @@ function App() {
                   </div>
                   {activeJobs.length ? (
                     <div className="job-list">
-                      {[...activeJobs].reverse().map((j) => (
+                      {activeJobs.map((j) => (
                         <div className="job" key={j.id}>
                           <div className="job-top">
                             <strong>{jobLabels[j.kind] || j.kind}</strong>
@@ -1067,18 +1071,43 @@ function App() {
                             </p>
                           )}
                           {j.status === "succeeded" &&
+                            j.kind === "export" &&
                             j.artifacts.length > 0 && (
                               <div className="downloads">
-                                {j.artifacts.map((name) => (
-                                  <a
-                                    key={name}
-                                    href={api.artifact(j, name)}
-                                    download
-                                  >
-                                    <Icon name="download" size={14} />
-                                    {name}
-                                  </a>
-                                ))}
+                                {j.artifacts
+                                  .filter((name) => /\.(mp4|mp3)$/i.test(name))
+                                  .map((name) => (
+                                    <a
+                                      key={name}
+                                      href={api.artifact(j, name)}
+                                      download
+                                    >
+                                      <Icon name="download" size={14} />
+                                      {name.toLowerCase().endsWith(".mp4")
+                                        ? "下载视频 · MP4"
+                                        : "下载音频 · MP3"}
+                                    </a>
+                                  ))}
+                                {j.artifacts.some(
+                                  (name) => !/\.(mp4|mp3)$/i.test(name),
+                                ) && (
+                                  <details className="export-extras">
+                                    <summary>附加文件</summary>
+                                    {j.artifacts
+                                      .filter(
+                                        (name) => !/\.(mp4|mp3)$/i.test(name),
+                                      )
+                                      .map((name) => (
+                                        <a
+                                          key={name}
+                                          href={api.artifact(j, name)}
+                                          download
+                                        >
+                                          {name}
+                                        </a>
+                                      ))}
+                                  </details>
+                                )}
                               </div>
                             )}
                         </div>
@@ -1118,6 +1147,7 @@ function App() {
                       {tab === "export" ? (
                         <ExportControls
                           value={output}
+                          hasVideo={project?.has_video}
                           disabled={!!busy}
                           onChange={(export_settings) =>
                             updateClip({ export_settings })
@@ -1125,10 +1155,9 @@ function App() {
                         />
                       ) : tab === "details" ? (
                         <>
-                          <div className="inspector-intro">
-                            <span className="eyebrow">CLIP DETAILS</span>
-                            <h3>让每首歌，都有名字。</h3>
-                          </div>
+                          <p className="inspector-note">
+                            歌名和原唱请手动填写。
+                          </p>
                           <label className="field">
                             歌曲名称
                             <input
@@ -1162,15 +1191,6 @@ function App() {
                               }
                             />
                           </label>
-                          <div className="pending-feature">
-                            <span className="tiny-tag">待接入</span>
-                            <strong>自动识曲</strong>
-                            <p>
-                              当前请手动填写歌曲信息。
-                              <br />
-                              系统不会生成未验证的识曲结果。
-                            </p>
-                          </div>
                           <div className="clip-facts">
                             <span>
                               片段来源
@@ -1215,10 +1235,6 @@ function App() {
                         </>
                       ) : (
                         <>
-                          <div className="inspector-intro">
-                            <span className="eyebrow">LYRICS & SUBTITLES</span>
-                            <h3>为歌声，添上字幕。</h3>
-                          </div>
                           <label className="file-pick">
                             导入 .lrc 文件
                             <input
@@ -1384,14 +1400,9 @@ function App() {
                           <p className="small muted">
                             预览显示当前歌词行，最终字幕样式以导出视频为准。
                           </p>
-                          <div className="pending-feature compact">
-                            <span className="tiny-tag">待接入</span>
-                            <strong>自动逐字对齐</strong>
-                            <p>
-                              KTV 样式仅在存在逐字时间时逐字高亮；普通 LRC
-                              使用整行时间。
-                            </p>
-                          </div>
+                          <p className="inspector-note">
+                            KTV 逐字高亮需要词级时间；普通 LRC 按行显示。
+                          </p>
                           {clip.lyrics.length > 0 && (
                             <details className="lyrics-list">
                               <summary>

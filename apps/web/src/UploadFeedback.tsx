@@ -7,6 +7,15 @@ export type FileUploadState = Omit<UploadProgress, "phase"> & {
   error?: string;
 };
 
+const fileSize = (bytes: number) =>
+  bytes >= 1073741824
+    ? `${(bytes / 1073741824).toFixed(2)} GB`
+    : bytes >= 1048576
+      ? `${(bytes / 1048576).toFixed(1)} MB`
+      : bytes >= 1024
+        ? `${(bytes / 1024).toFixed(1)} KB`
+        : `${bytes} B`;
+
 export function UploadFeedback({
   state,
   onRetry,
@@ -40,7 +49,7 @@ export function UploadFeedback({
           state.error ||
           (state.phase === "processing"
             ? "正在读取时长和校验文件…"
-            : `${(state.loaded / 1048576).toFixed(1)} MB${state.total ? ` / ${(state.total / 1048576).toFixed(1)} MB` : ""}`)
+            : `${fileSize(state.loaded)}${state.total ? ` / ${fileSize(state.total)}` : ""}`)
         }
       />
       {state.phase === "failed" && (
