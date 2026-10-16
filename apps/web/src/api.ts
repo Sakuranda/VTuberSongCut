@@ -343,10 +343,10 @@ export const api = {
     request<Job[]>(
       `/jobs${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`,
     ),
-  upload: (file: File) => {
+  upload: (file: File, onProgress?: (progress: UploadProgress) => void) => {
     const body = new FormData();
     body.append("file", file);
-    return request<Project>("/projects/upload", { method: "POST", body });
+    return uploadForm<Project>("/projects/upload", body, onProgress);
   },
   save: (project: Project) =>
     request<Project>(`/projects/${project.id}`, {

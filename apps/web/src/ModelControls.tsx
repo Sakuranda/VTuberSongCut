@@ -9,6 +9,7 @@ export function ModelSelector({
   disabled = false,
   onChange,
   onTrain,
+  onImport,
 }: {
   project: Project | null;
   catalog: ModelCatalog | null;
@@ -18,6 +19,7 @@ export function ModelSelector({
     detector_device?: DetectorDevice;
   }) => void;
   onTrain: () => void;
+  onImport: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const pinned = useRef(false);
@@ -174,9 +176,14 @@ export function ModelSelector({
             {selected?.unavailable_reason || "请重新选择模型。"}
           </p>
         )}
-      <button className="voice-text-button" type="button" onClick={onTrain}>
-        去模型训练与管理 →
-      </button>
+      <div className="voice-model-entrypoints">
+        <button className="voice-text-button" type="button" onClick={onImport}>
+          导入模型
+        </button>
+        <button className="voice-text-button" type="button" onClick={onTrain}>
+          训练模型 →
+        </button>
+      </div>
     </section>
   );
 }
@@ -217,7 +224,12 @@ export function ModelManager({
     }
   }
   return (
-    <section className="panel voice-library" aria-label="模型管理">
+    <section
+      className="panel voice-library"
+      aria-label="模型管理"
+      id="model-library"
+      tabIndex={-1}
+    >
       <div className="voice-library-header">
         <div>
           <h2>我的模型</h2>
@@ -261,10 +273,7 @@ export function ModelManager({
           {busy ? "正在导入并校验…" : "导入已有模型"}
         </button>
       </div>
-      <p className="voice-note">
-        支持 AutoSlicer 训练得到的 .pt / .pth
-        文件。导入只读取现有模型，不会开始训练。
-      </p>
+      <p className="voice-note">支持 AutoSlicer .pt / .pth 检测模型。</p>
       {message && (
         <p className="voice-model-success" role="status">
           {message}

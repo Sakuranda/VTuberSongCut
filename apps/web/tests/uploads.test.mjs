@@ -85,3 +85,21 @@ test('unknown upload length stays indeterminate and a network failure is actiona
     await rejected;
   } finally { fixture.restore(); }
 });
+
+test('cut workspace uploads use the same byte progress and authenticated multipart flow', async () => {
+  const fixture = setup();
+  try {
+    const seen = [];
+    const result = api.upload(new File(['media'], 'recording.mkv'), item => seen.push(item));
+    await tick();
+    const xhr = fixture.requests[0];
+    assert.equal(xhr.url, '/api/projects/upload');
+    assert.equal(xhr.body.get('file').name, 'recording.mkv');
+    xhr.upload.onprogress({ loaded: 2, total: 5, lengthComputable: true });
+    assert.equal(seen[0].loaded, 2);
+    xhr.status = 201;
+    xhr.responseText = JSON.stringify({ id: 'imported-recording' });
+    xhr.onload();
+    assert.equal((await result).id, 'imported-recording');
+  } finally { fixture.restore(); }
+});

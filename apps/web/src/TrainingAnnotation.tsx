@@ -283,42 +283,34 @@ export function TrainingAnnotation({
           </div>
         )}
       </div>
-      <div
-        className="shortcut-guide training-shortcuts"
-        aria-label="训练视频快捷键"
-      >
-        <span>
-          <kbd>空格</kbd> / <kbd>K</kbd> 播放 / 暂停
-        </span>
-        <span>
-          <kbd>←</kbd>
-          <kbd>→</kbd> 前后 1 秒
-        </span>
-        <span>
-          <kbd>Shift</kbd> + <kbd>←</kbd>
-          <kbd>→</kbd> 前后 10 秒
-        </span>
-        <span>
-          <kbd>I</kbd> 标记开始
-        </span>
-        <span>
-          <kbd>O</kbd> 标记结束
-        </span>
-        <span>
-          <kbd>A</kbd> 添加这段标注
-        </span>
-      </div>
-      <p className="training-shortcut-note">
-        点击视频或时间轴后使用；输入框内按键用于输入。添加标注后仍需保存。
-      </p>
-      <p className="training-hint preview-explanation">
-        {hasPreview
-          ? "正在使用兼容预览，训练仍使用原始素材。"
-          : flv
-            ? "FLV 可直接用于训练；页面播放与标注通常需要兼容预览。预览只需生成一次。"
-            : "能直接播放时无需转换；无法播放时再生成兼容预览。"}
-      </p>
-      {(preview || previewBusy) && (
+      <details className="training-keyboard-help">
+        <summary>
+          快捷键 <span>空格播放 · I / O 标记 · A 添加</span>
+        </summary>
+        <div
+          className="shortcut-guide training-shortcuts"
+          aria-label="训练视频快捷键"
+        >
+          <span>
+            <kbd>空格</kbd> / <kbd>K</kbd> 播放 / 暂停
+          </span>
+          <span>
+            <kbd>←</kbd>
+            <kbd>→</kbd> 前后 1 秒
+          </span>
+          <span>
+            <kbd>Shift</kbd> + <kbd>←</kbd>
+            <kbd>→</kbd> 前后 10 秒
+          </span>
+          <span>
+            <kbd>I</kbd> 开始 · <kbd>O</kbd> 结束 · <kbd>A</kbd> 添加
+          </span>
+        </div>
+        <p className="training-shortcut-note">
+          点击视频或时间轴后使用；输入时不会触发快捷键。
+        </p>
+      </details>
+      {(previewBusy || (preview && preview.status !== "succeeded")) && (
         <OperationProgress
           title={
             previewBusy
@@ -360,7 +352,7 @@ export function TrainingAnnotation({
         </p>
       )}
       <div className="annotation-heading">
-        <span>在时间轴拖出区间，或用下方时间戳精确标注。</span>
+        <span>拖动选择区间</span>
         <code>{format(now)}</code>
       </div>
       <div
@@ -424,9 +416,9 @@ export function TrainingAnnotation({
         <code>00:00:00</code>
         <code>{format(sample.duration_ms)}</code>
       </div>
-      <div className="annotation-controls">
-        <label className="field">
-          开始时间
+      <div className="annotation-controls" aria-label="标注区间">
+        <div className="field">
+          <label htmlFor={`train-start-${sample.id}`}>开始时间</label>
           <TimecodeInput
             id={`train-start-${sample.id}`}
             value={start}
@@ -442,13 +434,14 @@ export function TrainingAnnotation({
             className="text-action"
             disabled={disabled}
             aria-keyshortcuts="I"
+            aria-label="将当前播放位置设为开始时间"
             onClick={() => markBoundary("start")}
           >
-            用当前播放位置作开始
+            设为当前位置
           </button>
-        </label>
-        <label className="field">
-          结束时间
+        </div>
+        <div className="field">
+          <label htmlFor={`train-end-${sample.id}`}>结束时间</label>
           <TimecodeInput
             id={`train-end-${sample.id}`}
             value={end}
@@ -464,15 +457,14 @@ export function TrainingAnnotation({
             className="text-action"
             disabled={disabled}
             aria-keyshortcuts="O"
+            aria-label="将当前播放位置设为结束时间"
             onClick={() => markBoundary("end")}
           >
-            用当前播放位置作结束
+            设为当前位置
           </button>
-        </label>
-      </div>
-      <div className="annotation-add">
-        <label className="field">
-          这段是谁在唱？
+        </div>
+        <label className="field annotation-singer">
+          演唱者
           <select
             disabled={disabled}
             value={label}
@@ -480,8 +472,8 @@ export function TrainingAnnotation({
               setLabel(event.target.value as TrainingRegion["label"])
             }
           >
-            <option value="target">{dataset.target_name}在唱歌</option>
-            <option value="other">其他人 / 原唱在唱歌</option>
+            <option value="target">{dataset.target_name}</option>
+            <option value="other">其他人 / 原唱</option>
           </select>
         </label>
         <button
@@ -492,7 +484,7 @@ export function TrainingAnnotation({
           }
           onClick={addRegion}
         >
-          添加这段标注
+          添加标注
         </button>
       </div>
       {error && (
@@ -503,8 +495,7 @@ export function TrainingAnnotation({
       <div className="region-list" aria-label="已标注区间">
         {!sample.regions.length && (
           <p className="training-hint">
-            还没有标注。先找到一段{dataset.target_name}
-            的演唱，标记它的开始和结束。
+            选择开始、结束和演唱者，然后添加标注。
           </p>
         )}
         {sample.regions.map((region, index) => (

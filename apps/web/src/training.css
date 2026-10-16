@@ -816,3 +816,155 @@
   line-height: 1.8;
   color: #65758e;
 }
+
+/* Keep one annotation's time, identity and action in one scan line. */
+.annotation-controls {
+  grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) minmax(
+      140px,
+      180px
+    ) auto;
+  gap: 14px;
+  align-items: start;
+  margin-bottom: 18px;
+}
+.annotation-controls .field {
+  min-width: 0;
+  margin-bottom: 0;
+}
+.annotation-controls .field > label {
+  color: #526687;
+}
+.annotation-controls input,
+.annotation-controls select {
+  height: 40px;
+  min-width: 0;
+  width: 100%;
+}
+.annotation-controls > .button {
+  margin-top: 23px;
+  min-height: 40px;
+}
+.annotation-controls .text-action {
+  width: fit-content;
+  font-size: 11px;
+}
+.annotation-controls .annotation-singer select {
+  text-overflow: ellipsis;
+}
+.training-keyboard-help {
+  margin: 12px 0;
+  color: #65758e;
+  font-size: 12px;
+}
+.training-keyboard-help summary {
+  cursor: pointer;
+}
+.training-keyboard-help summary span {
+  margin-left: 14px;
+  font-size: 11px;
+  color: #7b87a0;
+}
+.training-keyboard-help .training-shortcuts {
+  margin-top: 10px;
+}
+.annotation-help {
+  margin: 0 0 12px;
+  color: #65758e;
+  font-size: 12px;
+}
+.annotation-help summary {
+  cursor: pointer;
+}
+.annotation-help p {
+  line-height: 1.8;
+  margin: 10px 0;
+}
+.training-heading-actions {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+.training-intro {
+  margin-top: 6px;
+  color: #65758e;
+}
+.training-project-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, auto);
+  gap: 20px;
+  align-items: center;
+  padding: 16px 18px;
+  border-bottom: 1px solid #edf0f6;
+}
+.training-project-bar .training-project-select {
+  margin: 0;
+}
+.training-project-bar .training-target {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 11px;
+}
+.training-create {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 16px;
+}
+.training-create .field {
+  margin-bottom: 0;
+}
+.training-sample-title {
+  align-items: center;
+  margin-bottom: 12px;
+}
+.training-sample-title .field {
+  width: 150px;
+}
+.review-confirm {
+  padding: 12px;
+  margin-top: 14px;
+}
+.review-confirm strong {
+  font-size: 12px;
+}
+.review-confirm small {
+  font-size: 11px;
+}
+.training-job > p,
+.training-checklist,
+.training-advanced summary {
+  font-size: 12px;
+}
+.training-upload-status:empty {
+  margin: 0;
+}
+@media (max-width: 720px) {
+  .annotation-controls {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 14px 10px;
+  }
+  .annotation-controls > .button {
+    align-self: start;
+    width: 100%;
+  }
+  .training-create {
+    grid-template-columns: 1fr;
+  }
+  .training-create .button {
+    width: 100%;
+  }
+  .training-project-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+  .training-heading-actions {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .training-keyboard-help summary span {
+    display: none;
+  }
+  .training-sample-title .field {
+    width: 100%;
+  }
+}

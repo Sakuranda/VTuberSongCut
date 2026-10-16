@@ -22,6 +22,9 @@ import { TimecodeInput } from "./TimecodeInput";
 import { ExportControls } from "./ExportControls";
 import { ModelSelector, ModelManager } from "./ModelControls";
 import { TrainingWorkspace } from "./TrainingWorkspace";
+import { UploadFeedback } from "./UploadFeedback";
+import type { FileUploadState } from "./UploadFeedback";
+import { OperationProgress } from "./OperationProgress";
 import "./styles.css";
 import "./training.css";
 
@@ -116,6 +119,7 @@ function App() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [caps, setCaps] = useState<Capabilities | null>(null);
   const [busy, setBusy] = useState("");
+  const [uploadState, setUploadState] = useState<FileUploadState | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [conflict, setConflict] = useState(false);
@@ -137,6 +141,10 @@ function App() {
   const previousJobs = useRef<Job[]>([]);
   const clip = project?.clips.find((c) => c.id === selected);
   const activeJobs = jobs.filter((j) => j.project_id === project?.id);
+  const previewJob = activeJobs.find(
+    (job) =>
+      job.kind === "preview" && ["queued", "running"].includes(job.status),
+  );
   const processing = activeJobs.some(
     (j) => j.status === "running" || j.status === "queued",
   );
@@ -151,6 +159,19 @@ function App() {
     !!catalog?.engine_ready &&
     !!detectorModel?.available &&
     !!detectorDevice?.available;
+  function switchWorkspace(next: "cut" | "training") {
+    media.current?.pause();
+    setWorkspace(next);
+    window.scrollTo({ top: 0 });
+  }
+  function openModelLibrary() {
+    switchWorkspace("training");
+    requestAnimationFrame(() => {
+      const library = document.getElementById("model-library");
+      library?.focus();
+      library?.scrollIntoView({ block: "start" });
+    });
+  }
   async function refreshCatalog() {
     try {
       setCatalog(await api.models());
@@ -161,7 +182,7 @@ function App() {
   }
   async function useModel(model: ModelInfo) {
     await refreshCatalog();
-    setWorkspace("cut");
+    switchWorkspace("cut");
     pendingModelId.current = live.current.project ? null : model.id;
     setProject((current) =>
       current ? { ...current, detector_model_id: model.id } : current,
@@ -276,7 +297,8 @@ function App() {
   }, []);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (live.current.dirty) event.preventDefault();
+      if (live.current.dirty || live.current.busy.includes("导入"))
+        event.preventDefault();
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
@@ -397,10 +419,27 @@ function App() {
     if (!file) return;
     if (dirty && !window.confirm("当前修改尚未保存。放弃修改并导入视频？"))
       return;
+    setUploadState({
+      phase: "uploading",
+      filename: file.name,
+      loaded: 0,
+      total: file.size,
+    });
     setBusy("正在导入视频，请稍候");
     setError("");
     try {
-      accept(await api.upload(file), false);
+      accept(
+        await api.upload(file, (progress) =>
+          setUploadState({ ...progress, filename: file.name }),
+        ),
+        false,
+      );
+      setUploadState({
+        phase: "succeeded",
+        filename: file.name,
+        loaded: file.size,
+        total: file.size,
+      });
       const pending = pendingModelId.current;
       if (pending) {
         setProject((current) =>
@@ -416,7 +455,14 @@ function App() {
           : "视频已导入，选择模型后可检测演唱片段，也可手动添加。",
       );
     } catch (e) {
-      fail(e);
+      setUploadState(
+        (state) =>
+          state && {
+            ...state,
+            phase: "failed",
+            error: e instanceof Error ? e.message : "导入失败，请重试",
+          },
+      );
     } finally {
       setBusy("");
       if (upload.current) upload.current.value = "";
@@ -498,30 +544,16 @@ function App() {
   const lyric = clip?.lyrics.find((l) => now >= l.start_ms && now < l.end_ms);
   return (
     <div className="app-shell">
-      <aside className="rail">
-        <div className="brand-mark">
-          <Icon name="music" size={27} />
-        </div>
-        <div className="rail-item active" title="剪辑工作台">
-          <Icon name="cut" />
-        </div>
-        <div className="rail-bottom">
-          <span className="local-dot" />
-          <span>本地</span>
-        </div>
-      </aside>
       <div className="app-body">
         <header className="topbar">
           <div className="brand">
             <h1>
               拾歌<span>VTuber SongCut</span>
             </h1>
-            <p>把直播里的好歌，留在这一刻。</p>
+            <p>直播歌切工作台</p>
           </div>
-          <div className="top-actions" hidden={workspace !== "cut"}>
-            <span className="local-label">
-              <span className="local-dot" /> 本地工作空间
-            </span>
+          <div className="top-actions" hidden={workspace !== "cut" || !project}>
+            <span className="local-label">工作空间</span>
             <button
               className="button primary"
               disabled={!!busy || processing}
@@ -534,7 +566,7 @@ function App() {
               ref={upload}
               hidden
               type="file"
-              accept=".mp4,.flv,video/mp4,video/x-flv"
+              accept=".mp4,.flv,.mkv,.mov,.webm,.avi,.ts,.m4v,.mp3,.wav,.m4a,.flac,.aac,.ogg,.opus,video/*,audio/*"
               onChange={(e) => void importVideo(e.target.files?.[0])}
             />
           </div>
@@ -545,7 +577,7 @@ function App() {
             aria-current={workspace === "cut" ? "page" : undefined}
             onClick={() => {
               media.current?.pause();
-              setWorkspace("cut");
+              switchWorkspace("cut");
             }}
           >
             录播切歌
@@ -555,7 +587,7 @@ function App() {
             aria-current={workspace === "training" ? "page" : undefined}
             onClick={() => {
               media.current?.pause();
-              setWorkspace("training");
+              switchWorkspace("training");
             }}
           >
             模型训练
@@ -565,10 +597,7 @@ function App() {
           <div hidden={workspace !== "cut"} aria-label="录播切歌工作区">
             <div className="page-heading">
               <div>
-                <div className="eyebrow">
-                  剪辑工作台 <span>/</span> WORKBENCH
-                </div>
-                <h2>{project ? project.name : "从一场直播，拾起一首歌。"}</h2>
+                <h2>{project ? project.name : "录播切歌"}</h2>
               </div>
               {project && (
                 <div className="save-group">
@@ -625,7 +654,12 @@ function App() {
                 </button>
               </div>
             )}
-            <div className="workbench">
+            <UploadFeedback
+              state={uploadState}
+              onRetry={() => upload.current?.click()}
+              disabled={!!busy || processing}
+            />
+            <div className={`workbench${!project ? " first-use" : ""}`}>
               <section className="panel library">
                 <div className="panel-heading">
                   <h3>
@@ -665,6 +699,7 @@ function App() {
                   </div>
                 )}
                 <ModelSelector
+                  onImport={openModelLibrary}
                   project={project}
                   catalog={catalog}
                   disabled={!!busy || processing}
@@ -676,7 +711,7 @@ function App() {
                   }}
                   onTrain={() => {
                     media.current?.pause();
-                    setWorkspace("training");
+                    switchWorkspace("training");
                   }}
                 />
                 {catalogError && (
@@ -758,18 +793,25 @@ function App() {
                       : !catalog
                         ? "正在读取模型信息…"
                         : !project.detector_model_id
-                        ? "先选择目标主播的模型"
-                        : !detectorModel?.available
-                          ? "已选模型不可用，请重新选择"
-                          : !catalog?.engine_ready
-                            ? "模型环境未就绪，可先手动添加片段"
-                            : !detectorDevice?.available
-                              ? "所选设备不可用，请选择自动或 CPU"
-                              : "检测结果追加到列表，保留已有片段"}
+                          ? "先选择目标主播的模型"
+                          : !detectorModel?.available
+                            ? "已选模型不可用，请重新选择"
+                            : !catalog?.engine_ready
+                              ? "模型环境未就绪，可先手动添加片段"
+                              : !detectorDevice?.available
+                                ? "所选设备不可用，请选择自动或 CPU"
+                                : "检测结果追加到列表，保留已有片段"}
                   </p>
                   {dirty && (
                     <p className="save-hint">
-                      保存修改后可检测、导入歌词和导出
+                      <button
+                        className="text-action"
+                        disabled={!!busy || conflict || invalidTime}
+                        onClick={() => void save()}
+                      >
+                        保存修改
+                      </button>{" "}
+                      后可继续检测与导出
                     </p>
                   )}
                 </div>
@@ -824,7 +866,7 @@ function App() {
                             <strong>浏览器暂时无法播放此素材</strong>
                             <p>生成兼容预览后继续剪辑，原始素材会用于导出。</p>
                             <button
-                              className="button"
+                              className="button primary"
                               disabled={blocked || !caps?.ffmpeg}
                               onClick={() => void run("preview")}
                             >
@@ -842,19 +884,39 @@ function App() {
                         <h3>
                           {loading
                             ? "正在连接本地工作空间…"
-                            : "你的下一支歌切，从这里开始"}
+                            : "导入录播，开始切歌"}
                         </h3>
-                        <p>导入 MP4 / FLV 直播录像，试听、裁切，再配上歌词。</p>
+                        <p>
+                          支持 MP4、FLV、MKV
+                          等视频及音频。导入后可自动检测或手动切片。
+                        </p>
                         <button
-                          className="button light"
+                          className="button primary"
                           disabled={!!busy || loading}
                           onClick={() => upload.current?.click()}
                         >
-                          <Icon name="upload" size={17} /> 选择直播录像
+                          <Icon name="upload" size={17} /> 导入录播
+                        </button>
+                        <button
+                          className="welcome-model-link"
+                          onClick={openModelLibrary}
+                        >
+                          已有主播模型？先导入模型
                         </button>
                       </div>
                     )}
                   </div>
+                  {previewJob && (
+                    <OperationProgress
+                      title="正在生成兼容预览"
+                      percent={
+                        typeof previewJob.progress === "number"
+                          ? Math.min(99, Math.floor(previewJob.progress * 100))
+                          : null
+                      }
+                      detail={previewJob.message}
+                    />
+                  )}
                   {project && (
                     <Timeline
                       duration={project.duration_ms}
@@ -1354,6 +1416,15 @@ function App() {
                       >
                         <Icon name="download" size={17} /> 导出 {outputLabel}
                       </button>
+                      {dirty && (
+                        <button
+                          className="button full"
+                          disabled={!!busy || conflict || invalidTime}
+                          onClick={() => void save()}
+                        >
+                          保存修改
+                        </button>
+                      )}
                       <p>
                         {dirty
                           ? "先保存修改，再导出当前片段"
@@ -1368,12 +1439,8 @@ function App() {
                 ) : (
                   <div className="inspector-empty">
                     <Icon name="settings" size={32} />
-                    <h3>选中一首，开始打磨</h3>
-                    <p>
-                      歌曲信息、歌词和导出设置
-                      <br />
-                      会在这里展开。
-                    </p>
+                    <h3>选择一个歌曲片段</h3>
+                    <p>在左侧添加或选中片段后编辑。</p>
                   </div>
                 )}
               </section>
@@ -1395,8 +1462,10 @@ function App() {
             }
           />
           <footer className="app-footer">
-            <span>拾歌 · 留住每一段好声音</span>
-            <span>素材与处理均在本地完成</span>
+            <span>拾歌 · VTuber SongCut</span>
+            <a href="/help/faq" target="_blank" rel="noreferrer">
+              使用帮助 ↗
+            </a>
           </footer>
         </main>
       </div>

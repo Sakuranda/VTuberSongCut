@@ -8,10 +8,10 @@ import type {
   TrainingJob,
   TrainingSample,
   TrainingSettings,
-  UploadProgress,
 } from "./api";
 import { TrainingAnnotation } from "./TrainingAnnotation";
-import { OperationProgress } from "./OperationProgress";
+import { UploadFeedback } from "./UploadFeedback";
+import type { FileUploadState } from "./UploadFeedback";
 
 const defaults: TrainingSettings = {
   device: "auto",
@@ -110,14 +110,7 @@ export function TrainingWorkspace({
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [pollError, setPollError] = useState("");
-  const [uploadState, setUploadState] = useState<
-    | (Omit<UploadProgress, "phase"> & {
-        phase: UploadProgress["phase"] | "succeeded" | "failed";
-        filename: string;
-        error?: string;
-      })
-    | null
-  >(null);
+  const [uploadState, setUploadState] = useState<FileUploadState | null>(null);
   const upload = useRef<HTMLInputElement>(null);
   const loaded = useRef(false);
   const knownModels = useRef(new Set<string>());
@@ -255,20 +248,26 @@ export function TrainingWorkspace({
     );
   }
   async function create() {
-    if (!name.trim() || !target.trim() || !canSwitch()) return;
+    if (!target.trim() || !canSwitch()) return;
     await operation("创建训练项目", async () => {
-      accept(await api.createTrainingDataset(name.trim(), target.trim()), "");
+      accept(
+        await api.createTrainingDataset(
+          name.trim() || `${target.trim()} · 演唱模型`,
+          target.trim(),
+        ),
+        "",
+      );
       setName("");
       setTarget("");
       setCreating(false);
-      setNotice("训练项目已创建。上传不同场次的录播，分别用于训练和验证。");
+      setNotice("项目已创建，可以导入录播了。");
     });
   }
   async function saveSample() {
     if (!dataset || !sample) return;
     await operation("保存标注", async () => {
       accept(await api.saveTrainingSample(dataset, sample));
-      setNotice("这份录播的用途和标注已保存。");
+      setNotice("标注已保存。");
     });
   }
   async function importSample(file?: File) {
@@ -311,20 +310,29 @@ export function TrainingWorkspace({
     >
       <div className="page-heading">
         <div>
-          <div className="eyebrow">自己的主播，自己的模型</div>
-          <h2>教拾歌认出谁在唱歌。</h2>
-          <p className="training-intro">
-            上传录播，标出演唱，再训练。模型只学习区分目标主播演唱与其余声音。
-          </p>
+          <h2>模型训练</h2>
+          <p className="training-intro">用录播标注训练自己的主播模型。</p>
         </div>
-        <a
-          className="button"
-          href="/help/faq#training"
-          target="_blank"
-          rel="noreferrer"
-        >
-          训练使用说明 ↗
-        </a>
+        <div className="training-heading-actions">
+          <button
+            className="button"
+            onClick={() => {
+              const library = document.getElementById("model-library");
+              library?.focus();
+              library?.scrollIntoView({ block: "start" });
+            }}
+          >
+            导入已有模型
+          </button>
+          <a
+            className="text-action"
+            href="/help/faq#training"
+            target="_blank"
+            rel="noreferrer"
+          >
+            训练帮助 ↗
+          </a>
+        </div>
       </div>
       {error && (
         <div className="banner error" role="alert">
@@ -351,17 +359,6 @@ export function TrainingWorkspace({
           <button onClick={() => setNotice("")}>关闭</button>
         </div>
       )}
-      <div className="training-flow" aria-label="训练流程">
-        <span>
-          <b>1</b> 创建项目与导入录播
-        </span>
-        <span>
-          <b>2</b> 预览、标注并复核
-        </span>
-        <span>
-          <b>3</b> 训练后去切歌
-        </span>
-      </div>
       <div className="training-grid">
         <section
           className="panel training-library"
@@ -373,73 +370,80 @@ export function TrainingWorkspace({
             </h3>
             <button
               className="text-action"
+              hidden={!datasets.length}
               disabled={!!busy}
               onClick={() => setCreating(!creating)}
             >
-              {creating ? "收起" : "+ 新建"}
+              {creating ? "取消新建" : "新建项目"}
             </button>
           </div>
           {(creating || (!datasets.length && !loading)) && (
             <div className="training-create">
               <label className="field">
-                项目名称
-                <input
-                  maxLength={200}
-                  value={name}
-                  placeholder="例如：我的主播演唱模型"
-                  disabled={!!busy}
-                  onChange={(event) => setName(event.target.value)}
-                />
-              </label>
-              <label className="field">
-                要识别的演唱者
+                主播名称
                 <input
                   maxLength={200}
                   value={target}
-                  placeholder="填写主播名字"
+                  placeholder="要识别谁的演唱？"
                   disabled={!!busy}
                   onChange={(event) => setTarget(event.target.value)}
                 />
               </label>
+              <label className="field">
+                项目名（选填）
+                <input
+                  maxLength={200}
+                  value={name}
+                  placeholder="默认使用主播名称"
+                  disabled={!!busy}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </label>
               <button
                 className="button primary"
-                disabled={!!busy || !name.trim() || !target.trim()}
+                disabled={!!busy || !target.trim()}
                 onClick={() => void create()}
               >
                 创建训练项目
               </button>
             </div>
           )}
-          <label className="field training-project-select">
-            当前训练项目
-            <select
-              disabled={!!busy || !datasets.length}
-              value={dataset?.id || ""}
-              onChange={(event) => {
-                if (!canSwitch()) return;
-                const id = event.target.value;
-                void operation("打开训练项目", async () =>
-                  accept(await api.trainingDataset(id), ""),
-                );
-              }}
-            >
-              {!dataset && (
-                <option value="">
-                  {loading ? "正在读取…" : "先创建训练项目"}
-                </option>
+          {datasets.length > 0 && (
+            <div className="training-project-bar">
+              <label className="field training-project-select">
+                训练项目
+                <select
+                  disabled={!!busy || !datasets.length}
+                  value={dataset?.id || ""}
+                  onChange={(event) => {
+                    if (!canSwitch()) return;
+                    const id = event.target.value;
+                    void operation("打开训练项目", async () =>
+                      accept(await api.trainingDataset(id), ""),
+                    );
+                  }}
+                >
+                  {!dataset && (
+                    <option value="">
+                      {loading ? "正在读取…" : "先创建训练项目"}
+                    </option>
+                  )}
+                  {datasets.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {dataset && (
+                <p className="training-target">
+                  主播 <strong>{dataset.target_name}</strong>
+                </p>
               )}
-              {datasets.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-          </label>
+            </div>
+          )}
           {dataset && (
             <>
-              <p className="training-target">
-                目标演唱者 <strong>{dataset.target_name}</strong>
-              </p>
               <div className="training-sample-heading">
                 <h3>
                   录播素材{" "}
@@ -461,60 +465,16 @@ export function TrainingWorkspace({
                 onChange={(event) => void importSample(event.target.files?.[0])}
               />
               <p className="training-hint library-hint">
-                准备至少两份不同场次的录播，一份用于学习，另一份用于验证。
+                至少两场不同录播，分别用于训练与验证。
                 {dirty && "保存当前标注后可继续上传。"}
               </p>
-              {uploadState && (
-                <div className="training-upload-status">
-                  <div
-                    className="training-upload-filename"
-                    title={uploadState.filename}
-                  >
-                    {uploadState.filename}
-                  </div>
-                  <OperationProgress
-                    title={
-                      {
-                        uploading: "正在上传文件",
-                        processing: "上传完成，正在检查素材",
-                        succeeded: "素材已导入",
-                        failed: "导入失败",
-                      }[uploadState.phase]
-                    }
-                    percent={
-                      uploadState.phase === "processing" ||
-                      uploadState.phase === "succeeded"
-                        ? 100
-                        : uploadState.total
-                          ? Math.min(
-                              100,
-                              Math.floor(
-                                (uploadState.loaded / uploadState.total) * 100,
-                              ),
-                            )
-                          : null
-                    }
-                    failed={uploadState.phase === "failed"}
-                    detail={
-                      uploadState.error ||
-                      (uploadState.phase === "processing"
-                        ? "文件已发送 100%，正在读取时长并校验内容，请等待导入完成。"
-                        : uploadState.phase === "succeeded"
-                          ? "已加入下方素材列表，请继续预览与标注。"
-                          : `${(uploadState.loaded / 1024 / 1024).toFixed(1)} MB${uploadState.total ? ` / ${(uploadState.total / 1024 / 1024).toFixed(1)} MB` : ""} · 上传期间请保持页面打开。`)
-                    }
-                  />
-                  {uploadState.phase === "failed" && (
-                    <button
-                      className="button"
-                      onClick={() => upload.current?.click()}
-                      disabled={!!busy || dirty}
-                    >
-                      重新选择文件
-                    </button>
-                  )}
-                </div>
-              )}
+              <div className="training-upload-status">
+                <UploadFeedback
+                  state={uploadState}
+                  onRetry={() => upload.current?.click()}
+                  disabled={!!busy || dirty}
+                />
+              </div>
               <div className="training-samples">
                 {dataset.samples.map((item) => (
                   <button
@@ -547,7 +507,7 @@ export function TrainingWorkspace({
           )}
         </section>
         <div className="training-main">
-          <section className="panel annotation-panel">
+          <section className="panel annotation-panel" hidden={!sample}>
             <div className="panel-heading">
               <h3>
                 <span className="training-step">2</span> 预览与标注
@@ -564,7 +524,7 @@ export function TrainingWorkspace({
                 <div className="training-sample-title">
                   <h3 title={sample.name}>{sample.name}</h3>
                   <label className="field">
-                    这份录播的用途
+                    素材用途
                     <select
                       disabled={!!busy}
                       value={sample.split}
@@ -575,15 +535,18 @@ export function TrainingWorkspace({
                         })
                       }
                     >
-                      <option value="train">训练：让模型学习</option>
-                      <option value="validation">验证：检查学得如何</option>
+                      <option value="train">训练集</option>
+                      <option value="validation">验证集</option>
                     </select>
                   </label>
                 </div>
-                <p className="training-hint">
-                  标出每一段{dataset.target_name}
-                  的演唱。遇到其他人或原唱唱歌，也可单独标记。说话、静音等其余声音在完整复核后会作为「非目标演唱」。
-                </p>
+                <details className="annotation-help">
+                  <summary>如何标注？</summary>
+                  <p>
+                    标出{dataset.target_name}
+                    的每段演唱，其他人或原唱选对应类别。完整复核后，未标注部分会作为非目标演唱。
+                  </p>
+                </details>
                 <TrainingAnnotation
                   active={active}
                   key={`${dataset.id}-${sample.id}`}
@@ -602,11 +565,9 @@ export function TrainingWorkspace({
                     }
                   />
                   <span>
-                    <strong>
-                      我已完整复核这份录播，标出了所有目标主播演唱
-                    </strong>
+                    <strong>已完整复核，目标主播的演唱无遗漏</strong>
                     <small>
-                      确认后，未标出的部分会被当作非目标演唱。增删区间后需要重新确认。
+                      未标注区间将作为非目标演唱。修改标注后需重新确认。
                     </small>
                   </span>
                 </label>
@@ -631,34 +592,27 @@ export function TrainingWorkspace({
                     disabled={!dirty || !!busy}
                     onClick={() => void saveSample()}
                   >
-                    {busy === "保存标注" ? "正在保存…" : "保存用途与标注"}
+                    {busy === "保存标注" ? "正在保存…" : "保存标注"}
                   </button>
                 </div>
               </div>
             ) : (
               <div className="training-empty">
-                <strong>
-                  {dataset
-                    ? "先上传两份不同场次的录播"
-                    : "为你要剪辑的主播建一个项目"}
-                </strong>
-                <p>
-                  留一份录播只做验证，让模型在没有学过的录播上检查效果。标注和训练都在这个工作区完成。
-                </p>
+                <strong>{dataset ? "先导入录播" : "先创建主播项目"}</strong>
+                <p>导入后可在这里试听、标记演唱区间。</p>
               </div>
             )}
           </section>
-          <section className="panel training-run-panel">
+          <section
+            className="panel training-run-panel"
+            hidden={!dataset?.samples.length}
+          >
             <div className="panel-heading">
               <h3>
                 <span className="training-step">3</span> 训练模型
               </h3>
-              <span className="small muted">识别目标主播的演唱</span>
             </div>
             <div className="training-run-body">
-              <p className="training-hint">
-                默认设置适合先开始一轮训练。训练完成后，请在另一份未参与训练和验证的录播上试听切歌结果。
-              </p>
               {reasons.length > 0 && (
                 <ul className="training-checklist">
                   {reasons.map((reason) => (
@@ -823,7 +777,10 @@ export function TrainingWorkspace({
               </button>
             </div>
           </section>
-          <section className="panel training-jobs">
+          <section
+            className="panel training-jobs"
+            hidden={!currentJobs.length && !pollError}
+          >
             <div className="panel-heading">
               <h3>训练进度</h3>
               <span className="count">{currentJobs.length}</span>

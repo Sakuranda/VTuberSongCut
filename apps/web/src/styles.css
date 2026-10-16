@@ -1943,3 +1943,78 @@ h2 {
     transform: none;
   }
 }
+
+/* The workspaces already provide navigation; no decorative dead-end rail. */
+.app-shell > .app-body {
+  width: 100%;
+  margin-left: 0;
+}
+.topbar {
+  height: 78px;
+}
+.workbench.first-use {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 900px;
+  margin: 0 auto;
+}
+.first-use > .library,
+.first-use > .inspector,
+.first-use .trim-panel,
+.first-use .jobs-panel,
+.first-use .preview-footer,
+.first-use .preview-panel > .panel-heading {
+  display: none;
+}
+.first-use .video-stage {
+  min-height: 390px;
+}
+.first-use .stage-invite h3 {
+  font-size: 20px;
+}
+.first-use .stage-invite p {
+  font-size: 13px;
+  max-width: 470px;
+  line-height: 1.8;
+}
+.welcome-model-link {
+  display: block;
+  border: 0;
+  background: transparent;
+  color: #ccd6fb;
+  margin: 20px auto 0;
+  font-size: 12px;
+  text-decoration: underline;
+}
+.media-error .button.primary {
+  color: #fff;
+  background: #3d5ec9;
+  border-color: #3d5ec9;
+}
+.preview-panel > .operation-progress {
+  margin: 12px 18px;
+}
+.file-upload-feedback {
+  margin: 16px 0;
+}
+.export-area .button + .button {
+  margin-top: 10px;
+}
+.voice-model-entrypoints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+#model-library {
+  scroll-margin-top: 16px;
+}
+@media (max-width: 720px) {
+  .first-use .video-stage {
+    min-height: 330px;
+  }
+  .first-use .stage-invite {
+    padding: 24px 18px;
+  }
+  .first-use .stage-invite h3 {
+    font-size: 18px;
+  }
+}
