@@ -54,5 +54,14 @@ class JobRunner:
                 job.message = message
             self.store.save_job(job)
 
+    def reset_progress(self, job_id: str, message: str):
+        """Start a real fallback encoding attempt instead of retaining copy progress."""
+        with self.lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status != "running":
+                return
+            job.progress, job.message = 0, message
+            self.store.save_job(job)
+
     def close(self):
         self.pool.shutdown(wait=True)

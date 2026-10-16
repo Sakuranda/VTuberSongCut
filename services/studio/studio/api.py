@@ -155,7 +155,9 @@ def create_app(settings: Settings | None = None):
             store.create(project)
         except Exception as exc:
             shutil.rmtree(folder)
-            raise HTTPException(422, f"无法导入文件，请检查媒体文件与 FFmpeg 安装：{type(exc).__name__}") from exc
+            if isinstance(exc, ValueError):
+                raise
+            raise HTTPException(422, "导入未完成，请检查磁盘空间和文件权限后重试") from exc
         finally:
             file.file.close()
         return project
@@ -325,7 +327,8 @@ def create_app(settings: Settings | None = None):
             try:
                 runner.update_progress(job_id, 0, "正在生成兼容预览")
                 media.preview(Path(sample["path"]), temporary, duration_ms=sample["duration_ms"],
-                              on_progress=lambda value: runner.update_progress(job_id, value))
+                              on_progress=lambda value: runner.update_progress(job_id, value),
+                              on_fallback=lambda: runner.reset_progress(job_id, "正在转换兼容预览"))
                 temporary.replace(preview)
             finally:
                 temporary.unlink(missing_ok=True)

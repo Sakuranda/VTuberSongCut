@@ -12,6 +12,10 @@ from ..domain import Project, Clip
 from .lyrics import render_ass
 
 
+class _PreviewEncodingError(RuntimeError):
+    """An FFmpeg failure that permits a stream-copy attempt to fall back."""
+
+
 class FFmpegMedia:
     def __init__(self):
         import imageio_ffmpeg
@@ -24,7 +28,7 @@ class FFmpegMedia:
         if result.returncode:
             raise RuntimeError("媒体处理失败：" + result.stderr[-1500:])
 
-    def probe(self, source: Path) -> tuple[int, bool]:
+    def _probe_data(self, source: Path):
         try:
             result = subprocess.run([self.ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(source)],
                                     capture_output=True, text=True, check=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
@@ -35,7 +39,13 @@ class FFmpegMedia:
         except OSError as exc:
             raise ValueError("无法启动媒体检查工具 ffprobe，请确认媒体工具可用：" + str(exc)) from exc
         try:
-            data = json.loads(result.stdout)
+            return json.loads(result.stdout)
+        except ValueError as exc:
+            raise ValueError("无法读取媒体信息，请检查素材是否完整") from exc
+
+    def probe(self, source: Path) -> tuple[int, bool]:
+        data = self._probe_data(source)
+        try:
             duration_ms = round(float(data["format"]["duration"])*1000)
             streams = data["streams"]
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
@@ -44,7 +54,7 @@ class FFmpegMedia:
             raise ValueError("录播需要包含音轨")
         if duration_ms <= 0:
             raise ValueError("无法读取媒体时长")
-        return duration_ms, any(s.get("codec_type") == "video" for s in streams)
+        return duration_ms, any(s.get("codec_type") == "video" and not s.get("disposition", {}).get("attached_pic") for s in streams)
 
     def source_fps(self, source: Path) -> float | None:
         from fractions import Fraction
@@ -66,16 +76,69 @@ class FFmpegMedia:
         return {"ffmpeg": available, "ffprobe": bool(shutil.which(self.ffprobe)), "subtitle_burn": subtitle}
 
     def preview(self, source: Path, output: Path, *, duration_ms: int | None = None,
-                on_progress: Callable[[float], None] | None = None):
-        arguments = ["-i", str(source), "-map", "0:v:0", "-map", "0:a:0", "-vf", "scale=1280:720:force_original_aspect_ratio=decrease:force_divisible_by=2",
-                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", str(output)]
-        if on_progress is None:
-            return self.run(arguments)
+                on_progress: Callable[[float], None] | None = None,
+                on_fallback: Callable[[], None] | None = None):
+        if source.resolve() == output.resolve():
+            raise ValueError("兼容预览不能覆盖原素材")
+        data = self._probe_data(source)
+        streams = data.get("streams", [])
+        audio = next((stream for stream in streams if stream.get("codec_type") == "audio"), None)
+        video = next((stream for stream in streams if stream.get("codec_type") == "video"
+                      and not stream.get("disposition", {}).get("attached_pic")), None)
+        if audio is None:
+            raise ValueError("素材需要包含音轨")
         if duration_ms is None:
-            duration_ms, _ = self.probe(source)
+            try:
+                duration_ms = round(float(data["format"]["duration"]) * 1000)
+            except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("无法读取媒体时长，请检查素材是否完整") from exc
         if duration_ms <= 0:
             raise ValueError("无法读取媒体时长")
-        self._run_preview(arguments, duration_ms, on_progress)
+        report = on_progress or (lambda value: None)
+        audio_copy = (audio.get("codec_name") == "aac" and audio.get("profile") == "LC"
+                      and audio.get("channels") in (1, 2))
+        video_copy = video is None or (video.get("codec_name") == "h264" and video.get("pix_fmt") == "yuv420p"
+                      and video.get("profile") in {"Baseline", "Constrained Baseline", "Main", "High"})
+        mapped = ["-i", str(source)]
+        if video is not None:
+            mapped += ["-map", f"0:{video['index']}"]
+        mapped += ["-map", f"0:{audio['index']}", "-sn", "-dn"]
+        # Retain mono and low sample rates; only downmix/resample sources
+        # beyond the compatibility target instead of upsampling small audio.
+        sample_rate = min(int(audio.get("sample_rate") or 48000), 48000)
+        encoded_audio = ["-c:a", "aac", "-profile:a", "aac_low", "-ac", "1" if audio.get("channels") == 1 else "2",
+                         "-ar", str(sample_rate)]
+        output.parent.mkdir(parents=True, exist_ok=True)
+        handle, temporary_name = tempfile.mkstemp(prefix=f".{output.stem}-", suffix=".mp4", dir=output.parent)
+        os.close(handle)
+        temporary = Path(temporary_name)
+        try:
+            if video_copy and (video is not None or audio_copy):
+                copied = ["-c", "copy"] if audio_copy else ["-c:v", "copy", *encoded_audio]
+                try:
+                    self._run_preview([*mapped, *copied, "-movflags", "+faststart", str(temporary)], duration_ms, report)
+                except _PreviewEncodingError:
+                    # A container can still reject timestamps or extradata even
+                    # when its declared codecs are suitable for a browser.
+                    temporary.unlink(missing_ok=True)
+                    if on_fallback:
+                        on_fallback()
+                    elif on_progress:
+                        on_progress(0)
+                else:
+                    temporary.replace(output)
+                    return
+            encoded = list(mapped)
+            if video is None:
+                encoded += ["-vn"]
+            else:
+                encoded += ["-vf", "scale=w='min(iw,1280)':h='min(ih,720)':force_original_aspect_ratio=decrease:force_divisible_by=2",
+                            "-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-pix_fmt", "yuv420p", "-profile:v", "main"]
+            encoded += [*encoded_audio, "-movflags", "+faststart", str(temporary)]
+            self._run_preview(encoded, duration_ms, report)
+            temporary.replace(output)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _run_preview(self, arguments, duration_ms, on_progress, timeout=6*3600):
         command = [self.ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
@@ -118,7 +181,7 @@ class FFmpegMedia:
                 if code:
                     errors.seek(0, os.SEEK_END)
                     errors.seek(max(0, errors.tell() - 6000))
-                    raise RuntimeError("生成兼容预览失败：" + errors.read().decode("utf-8", errors="replace")[-1500:])
+                    raise _PreviewEncodingError("生成兼容预览失败：" + errors.read().decode("utf-8", errors="replace")[-1500:])
             finally:
                 timer.cancel()
                 if process.poll() is None:

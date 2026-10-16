@@ -100,7 +100,7 @@ def test_training_preview_is_deduplicated_atomic_and_restorable(client, tmp_path
     studio = client.app.state.studio
     entered, release = Event(), Event()
     calls = []
-    def preview(source, target, *, duration_ms, on_progress):
+    def preview(source, target, *, duration_ms, on_progress, on_fallback=None):
         calls.append(source)
         assert duration_ms == sample["duration_ms"]
         on_progress(.35)
@@ -131,7 +131,7 @@ def test_training_preview_is_deduplicated_atomic_and_restorable(client, tmp_path
 def test_failed_preview_does_not_publish_partial_file_and_can_retry(client, tmp_path, monkeypatch):
     dataset, sample, base = add_sample(client, tmp_path)
     studio = client.app.state.studio
-    def fail(source, target, *, duration_ms, on_progress):
+    def fail(source, target, *, duration_ms, on_progress, on_fallback=None):
         on_progress(.4)
         target.write_bytes(b"partial output")
         raise RuntimeError("生成兼容预览失败：invalid input")
@@ -149,6 +149,24 @@ def test_failed_preview_does_not_publish_partial_file_and_can_retry(client, tmp_
     completed = finished(studio.store, "training-media:" + sample["id"])
     assert completed.status == "succeeded" and completed.progress == 1
     assert client.get(base + "/media").content == b"retry completed"
+
+
+def test_training_preview_fallback_resets_job_progress_with_an_explicit_stage(client, tmp_path, monkeypatch):
+    _, sample, base = add_sample(client, tmp_path)
+    studio = client.app.state.studio
+    observed = []
+    def preview(source, target, *, duration_ms, on_progress, on_fallback):
+        on_progress(.99)
+        on_fallback()
+        restarted = studio.store.jobs(project_id="training-media:" + sample["id"])[0]
+        observed.append((restarted.progress, restarted.message, restarted.status))
+        on_progress(.2)
+        target.write_bytes(b"fallback completed")
+    monkeypatch.setattr(studio.media, "preview", preview)
+    assert client.post(base + "/preview").status_code == 202
+    job = finished(studio.store, "training-media:" + sample["id"])
+    assert job.status == "succeeded" and job.progress == 1
+    assert observed == [(0, "正在转换兼容预览", "running")]
 
 
 @pytest.mark.parametrize("suffix", [".avi", ".ts", ".m4v", ".flac"])
@@ -186,12 +204,12 @@ def test_real_flv_preview_reports_ffmpeg_progress_and_publishes_only_complete_mp
     # multiple genuine FFmpeg progress records before the atomic publication.
     monkeypatch.setattr(media, "_run_preview", lambda arguments, duration, report:
                         original_stream(["-re", *arguments], duration, report))
-    def observed(source, target, *, duration_ms, on_progress):
+    def observed(source, target, *, duration_ms, on_progress, on_fallback=None):
         def report(progress):
             on_progress(progress)
             job = studio.store.jobs(project_id=project_id)[0]
             observations.append((progress, job.status, output.exists()))
-        return original(source, target, duration_ms=duration_ms, on_progress=report)
+        return original(source, target, duration_ms=duration_ms, on_progress=report, on_fallback=on_fallback)
     monkeypatch.setattr(media, "preview", observed)
     assert client.post(base + "/preview").status_code == 202
     job = finished(studio.store, project_id)
@@ -218,3 +236,43 @@ def test_real_invalid_upload_has_clear_error_and_no_saved_sample(client):
     assert response.status_code == 422
     assert "无法读取媒体" in response.json()["detail"]
     assert client.get(f"/api/training/datasets/{dataset['id']}").json()["samples"] == []
+
+
+def test_cut_invalid_upload_keeps_readable_media_error(client):
+    if not shutil.which(client.app.state.studio.media.ffprobe):
+        pytest.skip("ffprobe is not installed")
+    response = client.post("/api/projects/upload", files={"file": ("broken.flv", b"not media")})
+    assert response.status_code == 422
+    assert "无法读取媒体" in response.json()["detail"]
+    assert "ValueError" not in response.json()["detail"]
+    assert client.get("/api/projects").json() == []
+
+
+def test_real_audio_only_compatibility_preview_works_in_both_controllers(client, tmp_path):
+    studio = client.app.state.studio
+    media = studio.media
+    if not shutil.which(media.ffprobe) or not Path(media.ffmpeg).is_file():
+        pytest.skip("real FFmpeg and ffprobe are not installed")
+    source = tmp_path / "voice.flac"
+    media.run(["-f", "lavfi", "-i", "sine=sample_rate=16000", "-t", "1", "-c:a", "flac", str(source)])
+    original = source.read_bytes()
+    project = client.post("/api/projects/upload", files={"file": (source.name, original)}).json()
+    assert project["has_video"] is False
+    assert client.post(f"/api/projects/{project['id']}/preview").status_code == 202
+    assert finished(studio.store, project["id"]).status == "succeeded"
+    saved = studio.store.get(project["id"])
+    assert Path(saved.source_file).read_bytes() == original
+    streams = media._probe_data(Path(saved.preview_file))["streams"]
+    assert len(streams) == 1 and streams[0]["codec_name"] == "aac"
+    dataset = client.app.state.training.create_dataset("audio only", "singer")
+    sample_response = client.post(f"/api/training/datasets/{dataset['id']}/samples", data={"revision": 0},
+                                  files={"file": (source.name, original)})
+    assert sample_response.status_code == 201
+    sample = sample_response.json()["samples"][0]
+    base = f"/api/training/datasets/{dataset['id']}/samples/{sample['id']}"
+    assert client.post(base + "/preview").status_code == 202
+    assert finished(studio.store, "training-media:" + sample["id"]).status == "succeeded"
+    output = studio.data / "training/previews" / (sample["id"] + ".mp4")
+    streams = media._probe_data(output)["streams"]
+    assert len(streams) == 1 and streams[0]["codec_name"] == "aac"
+    assert client.get(f"/api/training/datasets/{dataset['id']}").json()["samples"][0]["preview_available"] is True

@@ -31,15 +31,14 @@ class Studio:
 
     def preview(self, ident: str):
         project = self.store.get(ident)
-        if not project.has_video:
-            raise ValueError("音频文件不需要视频预览代理")
         def operation(job_id):
             output = self.data / "jobs" / job_id
             output.mkdir(parents=True, exist_ok=True)
             target = output / "preview.mp4"
             self.runner.update_progress(job_id, 0, "正在生成兼容预览")
             self.media.preview(Path(project.source_file), target, duration_ms=project.duration_ms,
-                               on_progress=lambda value: self.runner.update_progress(job_id, value))
+                               on_progress=lambda value: self.runner.update_progress(job_id, value),
+                               on_fallback=lambda: self.runner.reset_progress(job_id, "正在转换兼容预览"))
             current = self.store.get(ident)
             current.preview_file = str(target)
             self.store.save(current, current.revision)
