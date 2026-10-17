@@ -111,6 +111,7 @@ export function TrainingWorkspace({
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [pollError, setPollError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [uploadState, setUploadState] = useState<FileUploadState | null>(null);
   const upload = useRef<HTMLInputElement>(null);
   const loaded = useRef(false);
@@ -135,6 +136,8 @@ export function TrainingWorkspace({
       JSON.stringify(dataset?.samples.find((item) => item.id === sample.id));
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty || busy === "导入训练录播";
+  const live = useRef({ dataset, busy });
+  live.current = { dataset, busy };
   const currentJobs = jobs.filter((job) => job.dataset_id === dataset?.id);
   const running = jobs.some((job) =>
     ["queued", "running"].includes(job.status),
@@ -176,14 +179,23 @@ export function TrainingWorkspace({
   useEffect(() => {
     if (!active || loaded.current) return;
     loaded.current = true;
+    setLoading(true);
     let stopped = false;
     let settled = false;
     api
       .trainingDatasets()
       .then((items) => {
         if (stopped) return;
-        setDatasets(items);
-        if (items.length) {
+        const current = live.current;
+        const selected = current.dataset;
+        // A recovered list read must not replace a project created/opened in
+        // the meantime, or discard its unsaved sample annotations.
+        setDatasets(
+          selected
+            ? [selected, ...items.filter((item) => item.id !== selected.id)]
+            : items,
+        );
+        if (items.length && !current.dataset && !current.busy) {
           setDataset(items[0]);
           setSample(items[0].samples[0] || null);
         }
@@ -202,7 +214,7 @@ export function TrainingWorkspace({
       stopped = true;
       if (!settled) loaded.current = false;
     };
-  }, [active]);
+  }, [active, loadAttempt]);
   usePolling(
     async (signal) => {
       try {
@@ -343,6 +355,18 @@ export function TrainingWorkspace({
               }}
             >
               重新载入项目
+            </button>
+          )}
+          {!dataset && (
+            <button
+              disabled={loading || !!busy}
+              onClick={() => {
+                loaded.current = false;
+                setError("");
+                setLoadAttempt((value) => value + 1);
+              }}
+            >
+              重新读取项目
             </button>
           )}
           <button onClick={() => setError("")}>关闭</button>

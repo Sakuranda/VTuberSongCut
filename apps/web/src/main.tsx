@@ -139,6 +139,10 @@ function App() {
   const [offset, setOffset] = useState(0);
   const [tab, setTab] = useState<"details" | "lyrics" | "export">("details");
   const [loading, setLoading] = useState(true);
+  const [startupAttempt, setStartupAttempt] = useState(0);
+  const [startupError, setStartupError] = useState("");
+  const [capabilityError, setCapabilityError] = useState("");
+  const [capabilitiesLoading, setCapabilitiesLoading] = useState(true);
   const [invalidTimes, setInvalidTimes] = useState<Record<string, boolean>>({});
   const invalidTime = Object.values(invalidTimes).some(Boolean);
   const media = useRef<HTMLVideoElement | null>(null);
@@ -257,23 +261,49 @@ function App() {
   }
   useEffect(() => {
     let stopped = false;
-    Promise.all([api.projects(), api.capabilities()])
-      .then(([list, capabilities]) => {
+    setLoading(true);
+    setCapabilitiesLoading(true);
+    setStartupError("");
+    setCapabilityError("");
+    api
+      .projects()
+      .then((list) => {
         if (stopped) return;
-        setProjects(list);
-        setCaps(capabilities);
-        if (list.length) accept(list[0], false);
+        const current = live.current.project;
+        setProjects(
+          current && !list.some((item) => item.id === current.id)
+            ? [current, ...list]
+            : list,
+        );
+        if (list.length && !live.current.project && !live.current.busy)
+          accept(list[0], false);
       })
       .catch((e) => {
-        if (!stopped) fail(e);
+        if (!stopped)
+          setStartupError(e instanceof Error ? e.message : "项目列表加载失败");
       })
       .finally(() => {
         if (!stopped) setLoading(false);
       });
+    // An unavailable media tool must not hide otherwise readable projects.
+    api
+      .capabilities()
+      .then((capabilities) => {
+        if (!stopped) setCaps(capabilities);
+      })
+      .catch((e) => {
+        if (!stopped)
+          setCapabilityError(
+            e instanceof Error ? e.message : "媒体工具检查失败",
+          );
+      })
+      .finally(() => {
+        if (!stopped) setCapabilitiesLoading(false);
+      });
     return () => {
       stopped = true;
     };
-  }, []);
+  }, [startupAttempt]);
   usePolling(
     async (signal) => {
       try {
@@ -671,6 +701,28 @@ function App() {
                 </div>
               )}
             </div>
+            {startupError && (
+              <div className="banner error" role="alert">
+                <span>项目列表暂时无法读取：{startupError}</span>
+                <button
+                  disabled={loading}
+                  onClick={() => setStartupAttempt((value) => value + 1)}
+                >
+                  重新连接
+                </button>
+              </div>
+            )}
+            {capabilityError && (
+              <div className="banner info" role="status">
+                <span>媒体工具暂时无法检查，可继续查看与编辑项目。</span>
+                <button
+                  disabled={capabilitiesLoading}
+                  onClick={() => setStartupAttempt((value) => value + 1)}
+                >
+                  重试检查
+                </button>
+              </div>
+            )}
             {error && (
               <div className="banner error" role="alert">
                 <span>{error}</span>
@@ -1473,9 +1525,13 @@ function App() {
                           ? "先保存修改，再导出当前片段"
                           : processing
                             ? "任务处理中，完成后可继续操作"
-                            : !caps?.ffmpeg
-                              ? "请先安装 FFmpeg 以启用导出"
-                              : "当前片段 · 输出文件保存在本地"}
+                            : capabilitiesLoading
+                              ? "正在检查媒体工具…"
+                              : capabilityError && !caps
+                                ? "媒体工具检查失败，请在上方重试"
+                                : !caps?.ffmpeg
+                                  ? "请先安装 FFmpeg 以启用导出"
+                                  : "当前片段 · 输出文件保存在本地"}
                       </p>
                     </div>
                   </>
