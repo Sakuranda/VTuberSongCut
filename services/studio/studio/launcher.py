@@ -56,15 +56,26 @@ def main():
     import uvicorn
     from studio.api import create_app
     server = uvicorn.Server(uvicorn.Config(create_app(), host="127.0.0.1", port=int(os.environ.get("SONGCUT_PORT", "8765")), access_log=False))
-    if shutdown_file := os.environ.get("SONGCUT_SHUTDOWN_FILE"):
-        def await_shutdown():
+    shutdown_file = os.environ.get("SONGCUT_SHUTDOWN_FILE")
+    ready_file = os.environ.get("SONGCUT_READY_FILE")
+    if shutdown_file or ready_file:
+        def monitor_desktop():
+            ready_written = False
             while not server.should_exit:
-                if Path(shutdown_file).exists():
+                if ready_file and server.started and not ready_written:
+                    import json
+                    Path(ready_file).write_text(json.dumps({"pid": os.getpid(), "port": server.config.port}), encoding="utf-8")
+                    ready_written = True
+                if shutdown_file and Path(shutdown_file).exists():
                     server.should_exit = True
                     return
-                time.sleep(.2)
-        threading.Thread(target=await_shutdown, daemon=True).start()
-    server.run()
+                time.sleep(.05 if ready_file and not ready_written else .2)
+        threading.Thread(target=monitor_desktop, daemon=True).start()
+    try:
+        server.run()
+    finally:
+        if ready_file:
+            Path(ready_file).unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
