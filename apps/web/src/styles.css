@@ -746,7 +746,7 @@ h2 {
   top: -4px;
   bottom: -4px;
   width: 1px;
-  background: var(--accent-solid);
+  background: var(--accent);
 }
 .boundary-controls {
   display: grid;
@@ -1199,7 +1199,7 @@ h2 {
     max-width: 125px;
   }
   .clip-item code {
-    font-size: 7px;
+    font-size: 11px;
   }
   .source-summary strong {
     max-width: 128px;
@@ -1213,7 +1213,7 @@ h2 {
     padding: 0 16px;
   }
   .boundary-label button {
-    font-size: 7px;
+    font-size: 11px;
   }
   .trim-note {
     padding-left: 16px;
@@ -1458,7 +1458,7 @@ h2 {
     min-height: 0;
   }
   .app-footer {
-    font-size: 7px;
+    font-size: 11px;
     letter-spacing: 0;
     padding: 22px 2px;
   }
@@ -1570,7 +1570,7 @@ h2 {
   position: absolute;
   top: -6px;
   bottom: -7px;
-  background: var(--accent-solid);
+  background: var(--accent);
   width: 1px;
   z-index: 3;
   pointer-events: none;
@@ -1582,7 +1582,7 @@ h2 {
   top: 0;
   width: 7px;
   height: 5px;
-  background: var(--accent-solid);
+  background: var(--accent);
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 .timeline-handle {
@@ -1849,7 +1849,7 @@ h2 {
     font-size: 11px;
   }
   .format-picks small {
-    font-size: 7px;
+    font-size: 11px;
   }
 }
 @media (max-width: 1080px) {
@@ -1894,20 +1894,20 @@ h2 {
     line-height: 40px;
   }
   .handle-help {
-    font-size: 7px;
+    font-size: 11px;
   }
   .shortcut-guide {
     gap: 7px 11px;
-    font-size: 7px;
+    font-size: 11px;
     margin-top: 13px;
   }
   .shortcut-guide kbd {
-    font-size: 7px;
+    font-size: 11px;
     padding: 2px 3px;
     min-width: 14px;
   }
   .timeline-labels code {
-    font-size: 7px;
+    font-size: 11px;
   }
   .time-input.timestamp-wrap .timestamp-input {
     font-size: 11px;
@@ -1924,7 +1924,7 @@ h2 {
     font-size: 11px;
   }
   .handle-time {
-    font-size: 7px;
+    font-size: 11px;
     padding: 5px;
   }
   .in-handle .handle-time {

@@ -191,6 +191,15 @@ test("every palette in both modes keeps readable text, links, buttons and status
           continue;
         Object.assign(tokens, values);
       }
+      for (const foreground of ["--control-line", "--accent"]) {
+        for (const background of ["--surface", "--surface-soft"]) {
+          const ratio = contrast(tokens[foreground], tokens[background]);
+          assert.ok(
+            ratio >= 3,
+            `${palette}/${mode} ${foreground} on ${background}: ${ratio.toFixed(2)} < 3`,
+          );
+        }
+      }
       for (const [foreground, background] of [
         ["--ink", "--surface"],
         ["--muted", "--surface"],
