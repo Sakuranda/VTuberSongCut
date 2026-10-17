@@ -26,8 +26,13 @@ import { UploadFeedback } from "./UploadFeedback";
 import type { FileUploadState } from "./UploadFeedback";
 import { OperationProgress } from "./OperationProgress";
 import { usePolling } from "./usePolling";
+import { AppearanceSettings } from "./AppearanceSettings";
+import { useAppearance } from "./theme";
+import { SkinWelcome, SkinAvatar } from "./SkinWelcome";
 import "./styles.css";
 import "./training.css";
+import "./SkinWelcome.css";
+import "./themes.css";
 
 const length = (ms: number) =>
   `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
@@ -110,6 +115,9 @@ function Icon({
   );
 }
 function App() {
+  const { appearance, resolvedMode, updateAppearance, resetAppearance } =
+    useAppearance();
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [workspace, setWorkspace] = useState<"cut" | "training">("cut");
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
   const [catalogError, setCatalogError] = useState("");
@@ -557,31 +565,69 @@ function App() {
     <div className="app-shell">
       <div className="app-body">
         <header className="topbar">
-          <div className="brand">
-            <h1>
-              拾歌<span>VTuber SongCut</span>
-            </h1>
-            <p>直播歌切工作台</p>
+          <div className="brand theme-brand">
+            {appearance.skin === "catgirl" && <SkinAvatar />}
+            <div>
+              <h1>
+                拾歌<span>VTuber SongCut</span>
+              </h1>
+              <p>直播歌切工作台</p>
+            </div>
           </div>
-          <div className="top-actions" hidden={workspace !== "cut" || !project}>
-            <span className="local-label">工作空间</span>
-            <button
-              className="button primary"
-              disabled={!!busy || processing}
-              onClick={() => upload.current?.click()}
+          <div className="header-controls">
+            <div
+              className="top-actions"
+              hidden={workspace !== "cut" || !project}
             >
-              <Icon name="upload" size={17} />
-              {busy.includes("导入视频") ? "正在导入…" : "导入录播"}
+              <span className="local-label">工作空间</span>
+              <button
+                className="button primary"
+                disabled={!!busy || processing}
+                onClick={() => upload.current?.click()}
+              >
+                <Icon name="upload" size={17} />
+                {busy.includes("导入视频") ? "正在导入…" : "导入录播"}
+              </button>
+              <input
+                ref={upload}
+                hidden
+                type="file"
+                accept=".mp4,.flv,.mkv,.mov,.webm,.avi,.ts,.m4v,.mp3,.wav,.m4a,.flac,.aac,.ogg,.opus,video/*,audio/*"
+                onChange={(e) => void importVideo(e.target.files?.[0])}
+              />
+            </div>
+            <button
+              className="button appearance-toggle"
+              aria-haspopup="dialog"
+              aria-expanded={appearanceOpen}
+              onClick={() => setAppearanceOpen(true)}
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                aria-hidden="true"
+              >
+                <path d="M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1.4-3.4 1.4 1.4 0 0 1 1-2.4h1A4.6 4.6 0 0 0 21 10.6 8 8 0 0 0 12 3Z" />
+                <circle cx="7.5" cy="10" r=".9" />
+                <circle cx="11" cy="7" r=".9" />
+                <circle cx="15.5" cy="8" r=".9" />
+              </svg>
+              外观
             </button>
-            <input
-              ref={upload}
-              hidden
-              type="file"
-              accept=".mp4,.flv,.mkv,.mov,.webm,.avi,.ts,.m4v,.mp3,.wav,.m4a,.flac,.aac,.ogg,.opus,video/*,audio/*"
-              onChange={(e) => void importVideo(e.target.files?.[0])}
-            />
           </div>
         </header>
+        <AppearanceSettings
+          open={appearanceOpen}
+          onClose={() => setAppearanceOpen(false)}
+          appearance={appearance}
+          resolvedMode={resolvedMode}
+          onChange={updateAppearance}
+          onReset={resetAppearance}
+        />
         <nav className="workspace-navigation" aria-label="工作区">
           <button
             className={workspace === "cut" ? "active" : ""}
@@ -887,34 +933,13 @@ function App() {
                         )}
                       </>
                     ) : (
-                      <div className="stage-invite">
-                        <div className="record-art">
-                          <div />
-                          <Icon name="music" size={38} />
-                        </div>
-                        <h3>
-                          {loading
-                            ? "正在连接本地工作空间…"
-                            : "导入录播，开始切歌"}
-                        </h3>
-                        <p>
-                          支持 MP4、FLV、MKV
-                          等视频及音频。导入后可自动检测或手动切片。
-                        </p>
-                        <button
-                          className="button primary"
-                          disabled={!!busy || loading}
-                          onClick={() => upload.current?.click()}
-                        >
-                          <Icon name="upload" size={17} /> 导入录播
-                        </button>
-                        <button
-                          className="welcome-model-link"
-                          onClick={openModelLibrary}
-                        >
-                          已有主播模型？先导入模型
-                        </button>
-                      </div>
+                      <SkinWelcome
+                        decorated={appearance.skin === "catgirl"}
+                        loading={loading}
+                        busy={!!busy}
+                        onImport={() => upload.current?.click()}
+                        onModels={openModelLibrary}
+                      />
                     )}
                   </div>
                   {previewJob && (

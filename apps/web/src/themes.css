@@ -1,0 +1,497 @@
+/* Application colors. The video canvas and user subtitle colors stay independent. */
+:root {
+  color-scheme: light;
+  --page: #edf3f0;
+  --surface: #ffffff;
+  --surface-soft: #f3f6f4;
+  --ink: #233c34;
+  --muted: #586d64;
+  --line: #cfdbd5;
+  --control-line: #7c8c83;
+  --shadow: #163e241a;
+  --accent: #237565;
+  --accent-solid: #237565;
+  --accent-hover: #195b4e;
+  --accent-soft: #e5f1eb;
+  --accent-line: #91b9a8;
+  --selection: #afcebf;
+  --focus: #237565;
+  --on-accent: #ffffff;
+  --success: #24694d;
+  --success-soft: #e6f3ea;
+  --success-line: #a2c9af;
+  --error: #a2354a;
+  --error-soft: #fcebee;
+  --error-line: #e5a8b3;
+  --warning: #87591c;
+  --warning-soft: #faf0de;
+  --warning-line: #d8bb8a;
+  --blue: var(--accent);
+  --lilac: var(--accent-soft);
+}
+:root[data-palette="violet"] {
+  --page: #f2eff7;
+  --accent: #7950a6;
+  --accent-solid: #7950a6;
+  --accent-hover: #623d8a;
+  --accent-soft: #f0e9f8;
+  --accent-line: #b9a0d0;
+  --selection: #ccbbdf;
+  --focus: #7950a6;
+}
+:root[data-palette="rose"] {
+  --page: #f7eff1;
+  --accent: #a64160;
+  --accent-solid: #a64160;
+  --accent-hover: #89314b;
+  --accent-soft: #faeaf0;
+  --accent-line: #d4a1b0;
+  --selection: #e6b7c6;
+  --focus: #a64160;
+}
+:root[data-palette="classic"] {
+  --page: #eef1f8;
+  --accent: #4264cc;
+  --accent-solid: #4264cc;
+  --accent-hover: #3150b0;
+  --accent-soft: #e9eefc;
+  --accent-line: #a2b1df;
+  --selection: #bdcaed;
+  --focus: #4264cc;
+}
+:root[data-mode="dark"] {
+  color-scheme: dark;
+  --page: #171d20;
+  --surface: #222a2d;
+  --surface-soft: #2b3437;
+  --ink: #ebf0ec;
+  --muted: #bbc8c0;
+  --line: #46534e;
+  --control-line: #81978b;
+  --shadow: #00000045;
+  --accent: #8cd1b8;
+  --accent-soft: #293f37;
+  --accent-line: #568672;
+  --selection: #406352;
+  --focus: #a7dfc7;
+  --success: #a1d9b1;
+  --success-soft: #263e2f;
+  --success-line: #50795e;
+  --error: #ffb1bd;
+  --error-soft: #492c34;
+  --error-line: #9f6370;
+  --warning: #e7c58f;
+  --warning-soft: #463a27;
+  --warning-line: #8b7552;
+}
+:root[data-mode="dark"][data-palette="violet"] {
+  --accent: #d0b1ef;
+  --accent-soft: #3b304b;
+  --accent-line: #8d70ac;
+  --selection: #5a4672;
+  --focus: #d9c1f2;
+}
+:root[data-mode="dark"][data-palette="rose"] {
+  --accent: #f0adbf;
+  --accent-soft: #492e38;
+  --accent-line: #a76c7c;
+  --selection: #704151;
+  --focus: #f4c2cf;
+}
+:root[data-mode="dark"][data-palette="classic"] {
+  --accent: #afc1ff;
+  --accent-soft: #2d3651;
+  --accent-line: #7186bf;
+  --selection: #435482;
+  --focus: #bfcdf9;
+}
+body {
+  color: var(--ink);
+  background: var(--page);
+}
+input,
+select,
+textarea {
+  accent-color: var(--accent);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+.button.primary,
+.brand-mark {
+  background: var(--accent-solid);
+  border-color: var(--accent-solid);
+  color: var(--on-accent);
+}
+.button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.button.light,
+.banner.info {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+.timeline-handle {
+  background: var(--accent-solid);
+  border-color: var(--accent-solid);
+}
+.timeline-handle:hover {
+  background: var(--accent-hover);
+}
+.handle-time {
+  background: var(--ink);
+  color: var(--surface);
+}
+.panel-heading h3,
+.songs-heading h3,
+.clip-item strong,
+.job-top strong {
+  font-size: 13px;
+}
+.button,
+.field,
+.field input,
+.field select,
+.field textarea,
+.project-select select,
+.inspector-tabs button,
+.workspace-navigation button,
+.time-input.timestamp-wrap .timestamp-input {
+  font-size: 13px;
+}
+.field small,
+.field input::placeholder,
+.field textarea::placeholder {
+  font-size: 11px;
+}
+.clip-item strong {
+  max-width: none;
+}
+.clip-item > div {
+  flex: 1;
+}
+.clip-origin {
+  position: static;
+  display: block;
+  margin-top: 6px;
+}
+.source-summary strong {
+  font-size: 12px;
+}
+.count,
+.status,
+.saved,
+.unsaved,
+.local-label {
+  font-size: 11px;
+}
+.inspector-content {
+  padding-inline: 18px;
+}
+.boundary-controls {
+  gap: 16px;
+}
+.boundary-label {
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.boundary-label label,
+.boundary-label button {
+  font-size: 11px;
+}
+.frame-nudges {
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.frame-nudges button {
+  font-size: 11px;
+  min-height: 30px;
+}
+.format-picks {
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.format-picks strong {
+  font-size: 12px;
+}
+.format-picks small {
+  white-space: normal;
+  line-height: 1.5;
+}
+.media-error .button.primary,
+.training-media-error .preview-action {
+  background: var(--accent-solid);
+  border-color: var(--accent-solid);
+  color: var(--on-accent);
+}
+.media-error .button.primary:hover:not(:disabled),
+.training-media-error .preview-action:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* Appearance is a small, keyboard-accessible workspace of its own. */
+.appearance-dialog {
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 24px 90px var(--shadow);
+}
+.appearance-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.appearance-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 24px;
+}
+.appearance-dialog::backdrop {
+  background: #111b28a6;
+}
+.appearance-heading {
+  flex-shrink: 0;
+  padding: 20px 24px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.appearance-heading h2 {
+  margin-top: 0;
+  font-size: 24px;
+}
+.appearance-close {
+  font-size: 24px;
+  min-width: 40px;
+  padding: 0;
+}
+.appearance-description {
+  margin: 12px 0 18px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.8;
+}
+.appearance-group {
+  min-width: 0;
+  margin: 0 0 18px;
+  padding: 0;
+  border: 0;
+}
+.appearance-group legend {
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 650;
+  padding: 0;
+}
+.appearance-skins {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.appearance-skin {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  padding: 12px;
+  background: var(--surface-soft);
+}
+.appearance-skin.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.appearance-skin input {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1;
+}
+.appearance-skin-art,
+.appearance-plain-art {
+  height: 112px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  border-radius: 7px;
+}
+.appearance-skin-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center 24%;
+}
+.appearance-skin strong {
+  font-size: 14px;
+}
+.appearance-skin > span {
+  font-size: 11px;
+  line-height: 1.8;
+  margin-top: 5px;
+  color: var(--muted);
+}
+.appearance-plain-art {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+}
+.appearance-plain-art i {
+  width: 7px;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--accent-line);
+}
+.appearance-plain-art i:nth-child(2n) {
+  height: 42px;
+}
+.appearance-plain-art i:nth-child(3n) {
+  height: 64px;
+  background: var(--accent);
+}
+.appearance-palettes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.appearance-palette {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 8px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.appearance-palette:has(input:checked),
+.appearance-modes label:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.appearance-swatch {
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+}
+.appearance-palette > span:last-child {
+  grid-column: 1 / -1;
+  text-align: center;
+}
+.appearance-dialog input[type="radio"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.appearance-modes {
+  display: flex;
+  gap: 8px;
+}
+.appearance-modes label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 6px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.appearance-system-note {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.appearance-footer {
+  flex-shrink: 0;
+  background: var(--surface);
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--line);
+}
+@media (max-width: 540px) {
+  .appearance-heading {
+    padding: 16px 18px 0;
+  }
+  .appearance-body {
+    padding-inline: 18px;
+  }
+  .appearance-footer {
+    padding: 12px 18px;
+  }
+  .appearance-palettes {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .appearance-skin-art,
+  .appearance-plain-art {
+    height: 100px;
+  }
+  .appearance-description {
+    margin-bottom: 16px;
+  }
+  .appearance-modes label {
+    font-size: 12px;
+    gap: 5px;
+  }
+}
+/* Inputs carry the user's content, so use the strongest text color. */
+.field input,
+.field select,
+.field textarea,
+.time-input input,
+.project-select select,
+.annotation-controls input,
+.annotation-controls select {
+  color: var(--ink);
+}
+.timestamp-input[aria-invalid="true"] {
+  color: var(--error);
+}
+.operation-progress-heading {
+  color: var(--ink);
+}
+.operation-progress.failed .operation-progress-heading {
+  color: var(--error);
+}
+
+.button,
+.field input,
+.field select,
+.field textarea,
+.time-input,
+.project-select select,
+.voice-import-form input[type="file"] {
+  border-color: var(--control-line);
+}
+.button.primary {
+  border-color: var(--accent-solid);
+}
+.button.light {
+  border-color: var(--accent-line);
+}
+.timestamp-input[aria-invalid="true"] {
+  border-color: var(--error-line);
+}
