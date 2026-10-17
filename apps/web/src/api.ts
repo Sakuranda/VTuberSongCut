@@ -149,40 +149,134 @@ export class ApiError extends Error {
     this.status = status;
   }
 }
-let session: Promise<string> | undefined;
-async function token() {
-  session ??= fetch("/api/session")
-    .then(async (r) => {
-      if (!r.ok) throw new Error("无法连接本地服务");
-      return (await r.json()).token as string;
-    })
-    .catch((e) => {
-      session = undefined;
-      throw e;
-    });
+const expiredSessionDetail = "会话已失效，请刷新工作台";
+interface Session {
+  token: Promise<string>;
+}
+let session: Session | undefined;
+
+function errorMessage(status: number, body: unknown, fallback: string) {
+  if (body !== null && typeof body === "object") {
+    const { detail, message } = body as { detail?: unknown; message?: unknown };
+    if (typeof detail === "string" && detail) return detail;
+    if (typeof message === "string" && message) return message;
+  }
+  return status === 401 ? "登录已失效，请使用服务器账户重新登录。" : fallback;
+}
+function expiredSession(status: number, body: unknown) {
+  return (
+    status === 403 &&
+    body !== null &&
+    typeof body === "object" &&
+    (body as { detail?: unknown }).detail === expiredSessionDetail
+  );
+}
+function getSession(stale?: Session): Session {
+  // Compare the actual session request, not its token: concurrent rejections of
+  // an old token must join the same refresh, including late arriving responses.
+  if (stale && session === stale) session = undefined;
+  if (!session) {
+    const next: Session = {
+      token: fetch("/api/session", { cache: "no-store" })
+        .then(async (response) => {
+          const body: unknown = await response.json().catch(() => undefined);
+          if (!response.ok)
+            throw new ApiError(
+              errorMessage(
+                response.status,
+                body,
+                "无法获取工作台会话，请检查本地服务后重试。",
+              ),
+              response.status,
+            );
+          const value =
+            body && typeof body === "object"
+              ? (body as { token?: unknown }).token
+              : undefined;
+          if (typeof value !== "string" || !value.trim())
+            throw new Error("工作台会话响应异常，请检查本地服务后重试。");
+          return value;
+        })
+        .catch((error: unknown) => {
+          if (session === next) session = undefined;
+          if (error instanceof TypeError)
+            throw new Error("无法连接本地服务，请确认服务已启动后重试。");
+          throw error;
+        }),
+    };
+    session = next;
+  }
   return session;
 }
+function withAbort<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal | null,
+): Promise<T> {
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", abort);
+    const abort = () => {
+      cleanup();
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+    if (signal.aborted) abort();
+  });
+}
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  if (init.method && init.method !== "GET")
-    headers.set("X-Studio-Token", await token());
-  const response = await fetch(`/api${path}`, { ...init, headers });
-  if (!response.ok) {
-    let message = `请求失败（${response.status}）`;
+  const protectedRequest = !["GET", "HEAD", "OPTIONS"].includes(
+    (init.method ?? "GET").toUpperCase(),
+  );
+  init.signal?.throwIfAborted();
+  let currentSession = protectedRequest ? getSession() : undefined;
+  for (let attempt = 0; ; attempt++) {
+    const headers = new Headers(init.headers);
+    if (currentSession)
+      headers.set(
+        "X-Studio-Token",
+        await withAbort(currentSession.token, init.signal),
+      );
+    init.signal?.throwIfAborted();
+    const response = await fetch(`/api${path}`, { ...init, headers });
+    let body: unknown;
     try {
-      const body = await response.json();
-      message =
-        typeof body.detail === "string"
-          ? body.detail
-          : typeof body.message === "string"
-            ? body.message
-            : message;
+      body = await response.json();
     } catch {
-      /* retain status */
+      init.signal?.throwIfAborted();
+      if (response.ok)
+        throw new ApiError(
+          "服务器响应异常，请重新载入项目确认操作是否已完成。",
+          response.status,
+        );
     }
-    throw new ApiError(message, response.status);
+    init.signal?.throwIfAborted();
+    // The middleware rejects this exact error before invoking any mutation.
+    // Never replay ordinary 403s, network errors, or ambiguous server responses.
+    if (
+      attempt === 0 &&
+      currentSession &&
+      expiredSession(response.status, body)
+    ) {
+      currentSession = getSession(currentSession);
+      continue;
+    }
+    if (!response.ok)
+      throw new ApiError(
+        errorMessage(response.status, body, `请求失败（${response.status}）`),
+        response.status,
+      );
+    return body as T;
   }
-  return response.json() as Promise<T>;
 }
 
 export interface UploadProgress {
@@ -190,25 +284,40 @@ export interface UploadProgress {
   loaded: number;
   total: number | null;
 }
-
-// fetch does not expose upload byte progress. Keep the same session protection
-// while distinguishing bytes sent from the server's import/probe response.
-export async function uploadForm<T>(
+interface UploadResponse {
+  status: number;
+  body: unknown;
+}
+function sendUpload(
   path: string,
   body: FormData,
+  sessionToken: string,
   onProgress?: (progress: UploadProgress) => void,
-): Promise<T> {
-  const sessionToken = await token();
-  return new Promise<T>((resolve, reject) => {
+  signal?: AbortSignal,
+): Promise<UploadResponse> {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    let settled = false;
     let transferred: UploadProgress = {
       phase: "uploading",
       loaded: 0,
       total: null,
     };
+    const abort = () => {
+      xhr.abort();
+      finish(() => reject(signal?.reason));
+    };
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", abort);
+      callback();
+    };
     xhr.open("POST", `/api${path}`);
     xhr.setRequestHeader("X-Studio-Token", sessionToken);
     xhr.upload.onprogress = (event) => {
+      if (settled) return;
       transferred = {
         phase: "uploading",
         loaded: event.loaded,
@@ -216,46 +325,91 @@ export async function uploadForm<T>(
       };
       onProgress?.(transferred);
     };
-    xhr.upload.onload = () =>
-      onProgress?.({ ...transferred, phase: "processing" });
-    xhr.onerror = () =>
-      reject(new Error("上传连接中断，请检查网络或本地服务后重新选择文件。"));
-    xhr.onabort = () => reject(new Error("上传已取消，请重新选择文件。"));
-    xhr.ontimeout = () =>
-      reject(new Error("上传超时，请检查连接后重新选择文件。"));
-    xhr.onload = () => {
-      let result: { detail?: unknown; message?: unknown };
-      try {
-        const parsed: unknown = JSON.parse(xhr.responseText);
-        result =
-          parsed !== null &&
-          typeof parsed === "object" &&
-          !Array.isArray(parsed)
-            ? parsed
-            : {};
-      } catch {
-        result = {};
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const fallback =
-          xhr.status === 413
-            ? "文件超过服务器允许的上传大小，请调整服务器限制或选择较小的文件。"
-            : `导入失败（${xhr.status}），请检查素材并重试。`;
-        const message =
-          typeof result.detail === "string"
-            ? result.detail
-            : typeof result.message === "string"
-              ? result.message
-              : fallback;
-        reject(new ApiError(message, xhr.status));
-      } else if (!xhr.responseText || !Object.keys(result).length) {
-        reject(new Error("服务器响应异常，请重新载入项目确认素材是否已导入。"));
-      } else {
-        resolve(result as T);
-      }
+    xhr.upload.onload = () => {
+      if (!settled) onProgress?.({ ...transferred, phase: "processing" });
     };
-    xhr.send(body);
+    xhr.onerror = () =>
+      finish(() =>
+        reject(
+          new Error("上传连接中断，请重新载入项目确认素材是否已导入后再重试。"),
+        ),
+      );
+    xhr.onabort = () =>
+      finish(() =>
+        reject(
+          signal?.aborted
+            ? signal.reason
+            : new Error("上传已取消，请重新选择文件。"),
+        ),
+      );
+    xhr.ontimeout = () =>
+      finish(() =>
+        reject(
+          new Error("上传超时，请重新载入项目确认素材是否已导入后再重试。"),
+        ),
+      );
+    xhr.onload = () => {
+      let result: unknown;
+      try {
+        result = JSON.parse(xhr.responseText);
+      } catch {
+        /* retain status */
+      }
+      finish(() => resolve({ status: xhr.status, body: result }));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    try {
+      xhr.send(body);
+    } catch (error) {
+      finish(() => reject(error));
+    }
   });
+}
+// fetch does not expose upload byte progress. Replay only an explicit session
+// rejection; network failures may have already imported the file on the server.
+export async function uploadForm<T>(
+  path: string,
+  body: FormData,
+  onProgress?: (progress: UploadProgress) => void,
+  signal?: AbortSignal,
+): Promise<T> {
+  signal?.throwIfAborted();
+  let currentSession = getSession();
+  for (let attempt = 0; ; attempt++) {
+    const sessionToken = await withAbort(currentSession.token, signal);
+    signal?.throwIfAborted();
+    const response = await sendUpload(
+      path,
+      body,
+      sessionToken,
+      onProgress,
+      signal,
+    );
+    signal?.throwIfAborted();
+    if (attempt === 0 && expiredSession(response.status, response.body)) {
+      currentSession = getSession(currentSession);
+      onProgress?.({ phase: "uploading", loaded: 0, total: null });
+      continue;
+    }
+    if (response.status < 200 || response.status >= 300) {
+      const fallback =
+        response.status === 413
+          ? "文件超过服务器允许的上传大小，请调整服务器限制或选择较小的文件。"
+          : `导入失败（${response.status}），请检查素材并重试。`;
+      throw new ApiError(
+        errorMessage(response.status, response.body, fallback),
+        response.status,
+      );
+    }
+    if (
+      response.body === null ||
+      typeof response.body !== "object" ||
+      Array.isArray(response.body) ||
+      !Object.keys(response.body).length
+    )
+      throw new Error("服务器响应异常，请重新载入项目确认素材是否已导入。");
+    return response.body as T;
+  }
 }
 const post = <T>(path: string, body?: unknown) =>
   request<T>(path, {
@@ -284,6 +438,7 @@ export const api = {
     dataset: TrainingDataset,
     file: File,
     onProgress?: (progress: UploadProgress) => void,
+    signal?: AbortSignal,
   ) => {
     const body = new FormData();
     body.append("file", file);
@@ -292,6 +447,7 @@ export const api = {
       `/training/datasets/${dataset.id}/samples`,
       body,
       onProgress,
+      signal,
     );
   },
   saveTrainingSample: (dataset: TrainingDataset, sample: TrainingSample) =>
@@ -346,14 +502,19 @@ export const api = {
       `/jobs${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`,
       { signal },
     ),
-  upload: (file: File, onProgress?: (progress: UploadProgress) => void) => {
+  upload: (
+    file: File,
+    onProgress?: (progress: UploadProgress) => void,
+    signal?: AbortSignal,
+  ) => {
     const body = new FormData();
     body.append("file", file);
-    return uploadForm<Project>("/projects/upload", body, onProgress);
+    return uploadForm<Project>("/projects/upload", body, onProgress, signal);
   },
-  save: (project: Project) =>
+  save: (project: Project, signal?: AbortSignal) =>
     request<Project>(`/projects/${project.id}`, {
       method: "PUT",
+      signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         revision: project.revision,
