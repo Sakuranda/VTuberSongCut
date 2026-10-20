@@ -134,6 +134,17 @@ export interface Job {
   model_id?: string;
   device?: string;
 }
+export interface CacheReport {
+  categories: { key: string; label: string; bytes: number; files: number }[];
+  bytes: number;
+  files: number;
+  retention_days: number;
+}
+export interface CacheCleanup extends CacheReport {
+  removed_bytes: number;
+  removed_files: number;
+  failed_files: number;
+}
 export interface Capabilities {
   detector_ready: boolean;
   ffmpeg: boolean;
@@ -429,6 +440,8 @@ export function projectEdits(project: Project) {
   };
 }
 export const api = {
+  cache: (signal?: AbortSignal) => request<CacheReport>("/cache", { signal }),
+  cleanCache: () => request<CacheCleanup>("/cache/clean", { method: "POST" }),
   trainingDatasets: () => request<TrainingDataset[]>("/training/datasets"),
   trainingDataset: (id: string) =>
     request<TrainingDataset>(`/training/datasets/${id}`),

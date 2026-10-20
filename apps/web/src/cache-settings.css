@@ -1,0 +1,51 @@
+.appearance-dialog.cache-dialog {
+  width: min(540px, calc(100vw - 32px));
+}
+.cache-dialog .appearance-body {
+  font-size: 13px;
+  line-height: 1.7;
+}
+.cache-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 16px;
+  background: var(--accent-soft);
+  border-radius: 12px;
+  color: var(--accent);
+}
+.cache-total strong {
+  font-size: 24px;
+}
+.cache-categories {
+  margin-block: 20px;
+}
+.cache-categories > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-block: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.cache-categories dd {
+  flex-shrink: 0;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.cache-browser-note {
+  color: var(--muted);
+}
+.app-footer .cache-link {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.cache-dialog .appearance-body > p:not(.appearance-description) {
+  margin-top: 12px;
+}

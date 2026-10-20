@@ -26,6 +26,7 @@ import { UploadFeedback } from "./UploadFeedback";
 import type { FileUploadState } from "./UploadFeedback";
 import { OperationProgress } from "./OperationProgress";
 import { usePolling } from "./usePolling";
+import { CacheSettings } from "./CacheSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { useAppearance } from "./theme";
 import { SkinWelcome, SkinAvatar } from "./SkinWelcome";
@@ -118,6 +119,7 @@ function App() {
   const { appearance, resolvedMode, updateAppearance, resetAppearance } =
     useAppearance();
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [cacheOpen, setCacheOpen] = useState(false);
   const [workspace, setWorkspace] = useState<"cut" | "training">("cut");
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
   const [catalogError, setCatalogError] = useState("");
@@ -650,6 +652,7 @@ function App() {
             </button>
           </div>
         </header>
+        <CacheSettings open={cacheOpen} onClose={() => setCacheOpen(false)} />
         <AppearanceSettings
           open={appearanceOpen}
           onClose={() => setAppearanceOpen(false)}
@@ -1562,6 +1565,7 @@ function App() {
           />
           <footer className="app-footer">
             <span>拾歌 · VTuber SongCut</span>
+            <button className="cache-link" aria-haspopup="dialog" onClick={() => setCacheOpen(true)}>缓存管理</button>
             <a href="/help/faq" target="_blank" rel="noreferrer">
               使用帮助 ↗
             </a>

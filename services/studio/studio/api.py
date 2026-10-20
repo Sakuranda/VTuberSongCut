@@ -22,6 +22,7 @@ from .adapters.autoslicer import AutoSlicerDetector
 from .adapters.media import FFmpegMedia
 from .model_library import ModelLibrary, ModelInfo, MAX_MODEL_BYTES, checksum
 from .training import TrainingService, normalize_settings
+from .cache import RuntimeCache
 
 
 MEDIA_SUFFIXES = {".mp4", ".flv", ".mkv", ".mov", ".webm", ".avi", ".ts", ".m4v",
@@ -72,18 +73,24 @@ def create_app(settings: Settings | None = None):
     training = TrainingService(config, store, register_model=lambda path, metadata:
         library.register_file(path, f"{metadata['target_name']} · 训练模型", "trained", metadata).model_dump())
     compute_lock = Lock()
+    cache = RuntimeCache(config.data, store)
     token = secrets.token_urlsafe(32)
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        training.close()
-        runner.close()
+        cache.start()
+        try:
+            yield
+        finally:
+            cache.close()
+            training.close()
+            runner.close()
 
     app = FastAPI(title="VTuber SongCut", version="0.1.0", lifespan=lifespan)
     app.state.studio = studio
     app.state.models = library
     app.state.training = training
+    app.state.cache = cache
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=server.allowed_hosts)
 
     @app.middleware("http")
@@ -105,8 +112,10 @@ def create_app(settings: Settings | None = None):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
         response.headers["X-Frame-Options"] = "DENY"
-        if server.enabled and request.url.path.startswith("/api/"):
+        if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
+        elif request.url.path in {"/", "/index.html"}:
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     @app.exception_handler(KeyError)
@@ -133,6 +142,14 @@ def create_app(settings: Settings | None = None):
     def capabilities():
         return {**media.capabilities(), "detector_ready": (config.upstream / "src/infer.py").is_file(),
                 "recognition": False, "alignment": False}
+
+    @app.get("/api/cache")
+    def cache_status():
+        return cache.inspect()
+
+    @app.post("/api/cache/clean")
+    def clean_cache():
+        return cache.clean()
 
     @app.get("/api/projects")
     def projects() -> list[Project]:
@@ -218,7 +235,10 @@ def create_app(settings: Settings | None = None):
         job = store.get_job(job_id)
         if not job or job.status != "succeeded" or filename not in job.artifacts or Path(filename).name != filename:
             raise HTTPException(404, "文件不存在或任务尚未完成")
-        return FileResponse(config.data / "jobs" / job_id / filename, filename=filename)
+        path = config.data / "jobs" / job_id / filename
+        if not path.is_file():
+            raise HTTPException(404, "文件已清理或不存在")
+        return FileResponse(path, filename=filename)
 
     @app.get("/api/models")
     def models():
