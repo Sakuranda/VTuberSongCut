@@ -31,6 +31,7 @@ def main():
     parser.add_argument("--media-build-record", type=Path, help="Verify both tools against this controlled build manifest")
     parser.add_argument("--ffprobe", help="Path to ffprobe (its dependent libraries are collected)")
     parser.add_argument("--skip-freeze", action="store_true", help="Only refresh build inputs")
+    parser.add_argument("--keep-build-work", action="store_true", help="Keep intermediate files for debugging after a successful freeze")
     args = parser.parse_args()
     import imageio_ffmpeg
     work = ROOT / "work/desktop-build"
@@ -153,6 +154,10 @@ def main():
         if extras:
             raise SystemExit(f"Uncontrolled imageio FFmpeg binaries leaked into the release: {extras}")
     print(f"Standalone backend ready: {destination / 'songcut-backend'}")
+    if not args.keep_build_work:
+        from clean import BUILD_WORK, remove_paths
+        remove_paths(ROOT, BUILD_WORK)
+        print("Removed disposable build intermediates; packaged backend and media compilation caches retained.")
 
 
 if __name__ == "__main__":

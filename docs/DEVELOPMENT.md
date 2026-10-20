@@ -130,3 +130,28 @@ SONGCUT_TRAINING_SMOKE=1 .venv/bin/python -m pytest services/studio/tests/test_t
 | `var/` | 被忽略的项目、模型、训练数据与导出产物 |
 
 时间统一使用源录播绝对毫秒；导出时再换算为片段相对时间。训练 GUI 和通用数据准备保存在拾歌主仓库，上游只承载兼容修改。设计说明见 [架构与模块契约](ARCHITECTURE.md)，规划及验收边界见 [路线图](ROADMAP.md)。
+
+## 构建文件清理
+
+`libtorch_cpu.dylib` 是 PyTorch 的运行库，不是主播模型。源码虚拟环境、打包暂存目录和桌面调试／发布目录各自可能有一份；符号链接会显示相同名字，但不额外占完整库的空间。不要按文件名全盘删除。
+
+从仓库根目录执行（Windows 使用 `python` 替换 `python3`）：
+
+```sh
+# 只列出清理范围与文件大小，不修改文件
+python3 scripts/clean.py
+
+# 关闭桌面程序并停止构建后，清理可重新生成的中间文件
+python3 scripts/clean.py --apply
+
+# 可选：同时清理打包暂存的完整后端，下次打包前需要重新生成
+python3 scripts/clean.py --apply --include-packaged-backend
+```
+
+默认仅清理 `work/desktop-build/` 内指定的 PyInstaller 中间文件、资源副本、媒体工具输入副本，以及 `target/debug/backend` 和 `target/release/backend`。执行前检查桌面／打包进程；无法检查或发现可能占用的进程时拒绝清理。使用固定路径白名单，不接受任意删除路径，也不沿链接路径进入其他目录。清理期间不要同时启动新的桌面程序或构建。
+
+保留 `.venv`、`var`（录播、标注、模型、任务、导出）、`upstream`、Web 构建产物、安装包、Rust 编译缓存和受控 FFmpeg 编译缓存。大小按文件统计，实际释放空间可能受文件系统克隆、压缩等影响。
+
+`build_desktop_backend.py` 成功完成打包后会自动清理自身中间文件，保留可分发的后端。排查构建问题可传 `--keep-build-work`；失败的构建保留现场，可在停止构建后用上述命令清理。`--skip-freeze` 专门准备构建输入，因此保留这些输入。
+
+运行期间，上传失败目录、预览转换中间文件及正常退出的临时工作区已有异常清理。此工具仅处理构建文件，不自动清空用户任务、已生成预览或崩溃后无法确认归属的媒体；没有按文件名或文件年龄删除用户素材的机制。
