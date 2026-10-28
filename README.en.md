@@ -99,6 +99,14 @@ The script builds and starts the service, generates access credentials, and conf
 
 Domain mode uses Caddy for HTTPS. See the [deployment guide](docs/DEPLOYMENT.md) for configuration, backups, and upgrades. The server provides a shared workspace for an individual or trusted team.
 
+### Bilibili recording and low-resource servers
+
+```sh
+./scripts/deploy.sh --recorder
+```
+
+Add a room in the recording library. Completed recordings are imported automatically and open with a shared 320p preview; HD playback supports up to 1080p. Named accounts, personal editing copies, CPU inference and bounded export queues are available. See the [recording guide](docs/RECORDING.md) and [server configuration](docs/LOW-RESOURCE-SERVER.md).
+
 ### Development from source
 
 See the [development guide](docs/DEVELOPMENT.md) for setup, desktop debugging, and test commands.

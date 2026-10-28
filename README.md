@@ -99,6 +99,14 @@ git clone https://github.com/Sakuranda/VTuberSongCut.git && cd VTuberSongCut
 
 域名模式使用 Caddy 提供 HTTPS。配置、备份和升级方法见[服务器部署指南](docs/DEPLOYMENT.md)。服务器版适用于个人或可信团队共享工作区。
 
+### B 站录制与低配服务器
+
+```sh
+./scripts/deploy.sh --recorder
+```
+
+在录播库添加房间，录制完成后自动入库；默认320p省流预览，可切换最高1080p。支持个人剪辑副本、CPU后台检测和受限导出队列。参见[录制接入](docs/RECORDING.md)与[低配/多人配置](docs/LOW-RESOURCE-SERVER.md)。
+
 ### 从源码开发
 
 开发环境、桌面调试和测试命令见[开发指南](docs/DEVELOPMENT.md)。
