@@ -29,3 +29,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Optional live recorder
+
+Server recording integration uses the separately deployed [BililiveRecorder](https://github.com/BililiveRecorder/BililiveRecorder) 2.20.0 container and its documented REST/Webhook APIs. BililiveRecorder is licensed under GPL-3.0; its code is not copied into this repository or the desktop bundle. Preserve the recorder's own license and source notices when distributing that component. See [recording deployment](docs/RECORDING.md).

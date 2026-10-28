@@ -1,0 +1,34 @@
+# Use with: docker compose -f compose.yaml -f deploy/compose.recorder.yaml up -d --build
+services:
+  songcut:
+    environment:
+      SONGCUT_RECORDER_URL: http://recorder:2356
+      SONGCUT_RECORDER_USERNAME: ${SONGCUT_RECORDER_USERNAME:?Set a recorder-only username}
+      SONGCUT_RECORDER_PASSWORD: ${SONGCUT_RECORDER_PASSWORD:?Set a recorder-only password}
+      SONGCUT_RECORDER_WEBHOOK_SECRET: ${SONGCUT_RECORDER_WEBHOOK_SECRET:?Generate a secret of at least 32 characters}
+      SONGCUT_RECORDER_ROOT: /recordings
+      SONGCUT_RECORDER_MAX_ROOMS: ${SONGCUT_RECORDER_MAX_ROOMS:-1}
+      SONGCUT_RECORDER_DISK_RESERVE_MB: ${SONGCUT_RECORDER_DISK_RESERVE_MB:-1024}
+      SONGCUT_RECORDER_CALLBACK_ORIGIN: http://songcut:8765
+      SONGCUT_RECORDER_QUEUE_LIMIT: ${SONGCUT_RECORDER_QUEUE_LIMIT:-32}
+    volumes:
+      - recorder-data:/recordings:ro
+  recorder:
+    image: ghcr.io/bililiverecorder/bililiverecorder:2.20.0
+    restart: unless-stopped
+    init: true
+    environment:
+      BREC_HTTP_BASIC_USER: ${SONGCUT_RECORDER_USERNAME:?Set a recorder-only username}
+      BREC_HTTP_BASIC_PASS: ${SONGCUT_RECORDER_PASSWORD:?Set a recorder-only password}
+      UMASK: "022"
+    volumes:
+      - recorder-data:/rec
+    expose:
+      - "2356"
+    cpus: ${SONGCUT_RECORDER_CPUS:-0.5}
+    mem_limit: ${SONGCUT_RECORDER_MEMORY:-512m}
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  recorder-data:
