@@ -72,12 +72,13 @@ def test_native_media_range_and_download_are_authenticated_without_csrf_header(s
     media.write_bytes(b"0123456789abcdef")
     project = Project(name="Fixture", source_name=media.name, source_file=str(media), duration_ms=1000)
     server.app.state.studio.store.create(project)
-    path = f"/api/projects/{project.id}/media"
+    path = f"/api/projects/{project.id}/media?quality=source"
     assert server.get(path).status_code == 401
     response = server.get(path, headers={**auth(), "Range": "bytes=2-5"})
     assert response.status_code == 206
     assert response.content == b"2345"
-    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["cache-control"] == "private, max-age=60, must-revalidate"
+    assert response.headers["vary"] == "Authorization"
 
 
 @pytest.mark.parametrize("updates", [

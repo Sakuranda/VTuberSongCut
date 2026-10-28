@@ -137,7 +137,8 @@ def test_inspection_is_fresh_and_media_http_responses_are_not_cached(cache_app):
     assert app.state.cache.clean()['removed_files'] == 0
     response = client.get(f'/api/projects/{project.id}/media')
     assert response.status_code == 200
-    assert response.headers['cache-control'] == 'no-store'
+    assert response.headers['cache-control'] == 'private, max-age=60, must-revalidate'
+    assert response.headers['vary'] == 'Authorization'
     assert client.get('/api/cache').headers['cache-control'] == 'no-store'
 
 

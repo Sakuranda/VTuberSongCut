@@ -1,0 +1,4 @@
+{
+  "editor-a": {"role": "editor", "password": "REPLACE-WITH-A-UNIQUE-STRONG-PASSWORD"},
+  "viewer-a": {"role": "viewer", "password": "REPLACE-WITH-ANOTHER-UNIQUE-PASSWORD"}
+}

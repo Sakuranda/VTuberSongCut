@@ -1,0 +1,12 @@
+# Optional named accounts: copy accounts.example.json to ../server-accounts.json first.
+services:
+  songcut:
+    environment:
+      SONGCUT_USERS_FILE: /run/songcut/accounts.json
+    volumes:
+      - type: bind
+        source: ./server-accounts.json
+        target: /run/songcut/accounts.json
+        read_only: true
+        bind:
+          create_host_path: false

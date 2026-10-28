@@ -62,6 +62,8 @@ def test_selection_is_explicit_and_project_scoped(setup, monkeypatch):
     from studio.adapters.autoslicer import AutoSlicerDetector
     monkeypatch.setattr(FFmpegMedia, "probe", lambda *args: (60_000, True))
     monkeypatch.setattr(FFmpegMedia, "source_fps", lambda *args: 25)
+    monkeypatch.setattr(FFmpegMedia, "metadata", lambda *args: dict(width=640, height=360, fps=25, browser_compatible=True))
+    monkeypatch.setattr(FFmpegMedia, "preview", lambda self, source, output, **kwargs: (output.parent.mkdir(parents=True, exist_ok=True), output.write_bytes(b"preview")))
     calls = []
     monkeypatch.setattr(AutoSlicerDetector, "detect", lambda self, *args: calls.append((self.checkpoint, self.device)) or [])
     app = create_app(setup)

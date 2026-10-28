@@ -56,6 +56,7 @@ class SongCandidate(Record):
 
 
 class ExportSettings(Record):
+    mode: Literal["precise", "fast"] = "precise"
     video: bool = True
     audio: bool = True
     video_codec: Literal["h264", "hevc"] = "h264"
@@ -104,6 +105,15 @@ class Project(Record):
     has_video: bool = True
     source_fps: float | None = Field(default=None, gt=0)
     preview_file: str | None = None
+    preview_profile: str | None = None
+    high_preview_file: str | None = None
+    source_width: int | None = None
+    source_height: int | None = None
+    source_browser_compatible: bool = False
+    owner: str | None = None
+    shared: bool = False
+    source_project_id: str | None = None
+    recording: dict | None = None
     clips: list[Clip] = Field(default_factory=list)
     detector_model_id: str | None = None
     detector_device: Literal["auto", "cpu", "mps", "cuda"] = "auto"
@@ -122,11 +132,14 @@ class Job(Record):
     project_id: str
     kind: str
     input_revision: int | None = None
+    owner: str | None = None
+    task: dict | None = None
+    cache_key: str | None = None
     model_id: str | None = None
     model_name: str | None = None
     model_sha256: str | None = None
     device: str | None = None
-    status: Literal["queued", "running", "succeeded", "failed", "interrupted"] = "queued"
+    status: Literal["queued", "running", "succeeded", "failed", "interrupted", "cancelled"] = "queued"
     message: str = "等待处理"
     progress: float = Field(default=0, ge=0, le=1)
     artifacts: list[str] = Field(default_factory=list)

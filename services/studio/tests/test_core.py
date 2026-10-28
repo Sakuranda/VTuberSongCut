@@ -16,7 +16,7 @@ from studio.adapters.lyrics import parse_lrc, render_ass
 
 
 def project(**updates):
-    return Project(name="测试歌回", source_name="vod.mp4", source_file="/unused/vod.mp4", duration_ms=60_000, **updates)
+    return Project(**{**dict(name="测试歌回", source_name="vod.mp4", source_file="/unused/vod.mp4", duration_ms=60_000), **updates})
 
 
 @pytest.mark.parametrize("start,end", [(-1, 100), (100, 100), (200, 100)])
@@ -102,7 +102,9 @@ def test_failed_operation_is_persisted_and_project_lock_is_released(tmp_path):
 
 def test_detection_preserves_manual_edits_made_while_running(tmp_path):
     store = Store(tmp_path / "test.sqlite3")
-    original = project()
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"fixture")
+    original = project(source_file=str(source))
     store.create(original)
     entered, release = Event(), Event()
     class Detector:
@@ -173,6 +175,8 @@ def client(tmp_path, monkeypatch):
     # Dummy bytes never reach FFprobe; this tests HTTP/persistence, not media decoding.
     from studio.adapters.media import FFmpegMedia
     monkeypatch.setattr(FFmpegMedia, "probe", lambda self, source: (60_000, True))
+    monkeypatch.setattr(FFmpegMedia, "metadata", lambda *args: dict(width=640, height=360, fps=25, browser_compatible=True))
+    monkeypatch.setattr(FFmpegMedia, "preview", lambda self, source, output, **kwargs: (output.parent.mkdir(parents=True, exist_ok=True), output.write_bytes(b"preview")))
     settings = Settings(root=tmp_path, data=tmp_path / "data", upstream=tmp_path / "upstream", checkpoint=tmp_path / "missing.pt")
     app = create_app(settings)
     with TestClient(app) as connected:
@@ -306,7 +310,9 @@ def test_export_job_uses_immutable_project_snapshot_while_user_edits(tmp_path):
     store = Store(tmp_path / "test.sqlite3")
     original_clip = Clip(start_ms=1000, end_ms=4000, title="导出时标题", export_settings=ExportSettings(
         video=False, audio=True, audio_bitrate_kbps=128))
-    original = project(source_fps=29.97, clips=[original_clip])
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"fixture")
+    original = project(source_file=str(source), source_fps=29.97, clips=[original_clip])
     store.create(original)
     entered, release = Event(), Event()
     observed = {}

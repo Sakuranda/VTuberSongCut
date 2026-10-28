@@ -39,7 +39,7 @@ class RuntimeCache:
             training = [json.loads(r[0]) for r in db.execute('SELECT data FROM training_jobs')]
             datasets = [json.loads(r[0]) for r in db.execute('SELECT data FROM training_datasets')]
         # Protect every referenced source, even if imported through another API.
-        protected = {str(Path(p[key]).resolve()) for p in projects for key in ('source_file', 'preview_file') if p.get(key)}
+        protected = {str(Path(p[key]).resolve()) for p in projects for key in ('source_file', 'preview_file', 'high_preview_file') if p.get(key)}
         protected.update(str(Path(s['path']).resolve()) for d in datasets for s in d['samples'])
         samples = {s['id'] for d in datasets for s in d['samples']}
         known = {j['id']: j for j in jobs}
@@ -85,6 +85,36 @@ class RuntimeCache:
                     match = re.search(r'([0-9a-f]{32})\.([0-9a-f]{32})\.pending', path.name)
                     if match and (job := known.get(match[2])) and job['kind'] == 'training_preview' and job['status'] in TERMINAL:
                         add(path, 'temporary')
+        # Shared derivatives use immutable source signatures, including editing
+        # copies which may not yet have persisted their preview pointer.
+        from .service import source_signature
+        from .domain import Project
+        from .adapters.media import PREVIEW_PROFILES
+        live_sources = set()
+        active_detection = set()
+        for project in projects:
+            try:
+                signature = source_signature(Project.model_validate(project))
+                for profile in ("low", "high"):
+                    protected.add(str(self.data / "previews" / f"{signature}-{PREVIEW_PROFILES[profile]}.mp4"))
+            except (OSError, ValueError):
+                pass
+        for job in jobs:
+            if job["status"] not in TERMINAL and job.get("task"):
+                live_sources.add(job["task"].get("source"))
+                if job["task"].get("cache"):
+                    active_detection.add(job["task"]["cache"])
+        directory = self.data / "previews"
+        if directory.resolve() == directory:
+            for path in directory.glob("*.mp4"):
+                match = re.match(r"\.?([0-9a-f]{64})-(?:low320-v1|high1080-v1)(?:-[\w-]+)?\.mp4$", path.name)
+                if match and match[1] not in live_sources:
+                    add(path, 'temporary' if path.name.startswith('.') else 'previews')
+        directory = self.data / "detections"
+        if directory.resolve() == directory:
+            for path in directory.glob("*.json"):
+                if re.fullmatch(r"[0-9a-f]{64}\.json", path.name) and str(path) not in active_detection:
+                    add(path, 'detection')
         return found
 
     def report(self, candidates):
