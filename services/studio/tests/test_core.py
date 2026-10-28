@@ -366,3 +366,27 @@ def test_ktv_preserves_already_sung_word_when_clip_starts_mid_line():
     assert r"{\kf0}前" in ass
     assert r"{\kf50}中" in ass
     assert "后" in ass
+
+
+def test_detection_does_not_apply_old_model_after_selection_changes(tmp_path):
+    source = tmp_path/'source.mp4'; source.write_bytes(b'fixture')
+    store = Store(tmp_path/'store.sqlite3')
+    original = project(source_file=str(source), detector_model_id='model-a')
+    store.create(original)
+    entered, release = Event(), Event()
+    class Detector:
+        def detect(self, *args):
+            entered.set()
+            assert release.wait(5)
+            return [Clip(start_ms=1000,end_ms=2000)]
+    runner = JobRunner(store)
+    studio = Studio(tmp_path,store,runner,Detector(),None)
+    try:
+        job = studio.detect(original.id, model_info={'model_id':'model-a'})
+        assert entered.wait(5)
+        current = store.get(original.id); current.detector_model_id='model-b'
+        store.save(current,current.revision)
+    finally:
+        release.set(); runner.close()
+    assert store.get_job(job.id).status=='failed'
+    assert not store.get(original.id).clips

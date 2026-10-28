@@ -75,18 +75,25 @@ class Studio:
         project = self.store.get(task['project_id'])
         if source_signature(project) != task['source']:
             raise ValueError('原始素材已变化，请重新导入后检测')
+        expected_model = (task.get('model') or {}).get('model_id')
+        if expected_model and project.detector_model_id != expected_model:
+            raise ValueError('模型选择已变化，请重新发起检测')
         cache = Path(task['cache'])
         if cache.is_file():
             clips = [Clip.model_validate(c) for c in json.loads(cache.read_text())]
         else:
             selected = selected or self.detector_factory(task['model'])
             clips = selected.detect(Path(project.source_file), self.data / 'jobs' / job_id, project.duration_ms)
+            if source_signature(project) != task['source']:
+                raise ValueError('检测过程中原始素材已变化，请重新导入')
             cache.parent.mkdir(parents=True, exist_ok=True)
             temporary = cache.with_suffix('.tmp')
             temporary.write_text(json.dumps([c.model_dump() for c in clips], ensure_ascii=False))
             temporary.replace(cache)
         checkpoint()
         current = self.store.get(project.id)
+        if expected_model and current.detector_model_id != expected_model:
+            raise ValueError('模型选择已变化，未写入旧模型结果，请重新检测')
         for clip in clips:
             if not any(min(clip.end_ms, c.end_ms) > max(clip.start_ms, c.start_ms) for c in current.clips):
                 current.clips.append(clip)

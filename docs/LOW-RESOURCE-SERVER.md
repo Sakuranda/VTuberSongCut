@@ -34,7 +34,7 @@ chmod 600 server-accounts.json
 ./scripts/deploy.sh --recorder
 ```
 
-脚本发现 `server-accounts.json` 后自动只读挂载并启用。该文件被 Git 忽略，修改账户后重启应用生效。源代码模式设置 `SONGCUT_USERS_FILE` 为绝对路径；文件必须保留至少一个管理员，原 `.env.server` 管理员默认仍有效。
+脚本发现 `server-accounts.json` 后读取并作为服务端配置传入容器环境，不需要放宽宿主机文件的0600权限。容器管理员可像查看其他环境配置一样查看它，请勿公开容器完整配置。该文件被 Git 忽略，修改账户后重启应用生效。源代码模式设置 `SONGCUT_USERS_FILE` 为可读取的绝对路径，或使用 `SONGCUT_USERS_JSON`（二选一）；文件必须保留至少一个管理员，原 `.env.server` 管理员默认仍有效。
 
 | 角色 | 能力 |
 | --- | --- |

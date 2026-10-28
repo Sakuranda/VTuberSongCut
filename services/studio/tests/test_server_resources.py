@@ -181,3 +181,18 @@ def test_shared_preview_reuse_keeps_requesters_project_context(server):
         assert visible[0]['project_id'] == alice.id and 'task' not in visible[0]
     finally:
         release.set()
+
+
+def test_container_accounts_can_use_environment_without_world_readable_mount(monkeypatch):
+    from studio.access import Access
+    from studio.server_config import ServerConfig
+    import base64
+    monkeypatch.delenv('SONGCUT_USERS_FILE', raising=False)
+    monkeypatch.setenv('SONGCUT_USERS_JSON', json.dumps({'reader': {'role':'viewer','password':'private-reader-password'}}))
+    access = Access(ServerConfig(enabled=True, username='admin', password='private-admin-password'))
+    header = 'Basic ' + base64.b64encode(b'reader:private-reader-password').decode()
+    identity = access.identify(header)
+    assert identity.name == 'reader' and identity.role == 'viewer'
+    monkeypatch.setenv('SONGCUT_USERS_FILE', '/must-not-be-read')
+    with pytest.raises(ValueError, match='only one'):
+        Access(ServerConfig(enabled=True, username='admin', password='private-admin-password'))

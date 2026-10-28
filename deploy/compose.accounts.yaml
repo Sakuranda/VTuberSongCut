@@ -1,12 +1,6 @@
-# Optional named accounts: copy accounts.example.json to ../server-accounts.json first.
+# deploy.sh reads the private host account file into the container environment.
+# Manual Compose: export SONGCUT_USERS_JSON="$(cat server-accounts.json)" first.
 services:
   songcut:
     environment:
-      SONGCUT_USERS_FILE: /run/songcut/accounts.json
-    volumes:
-      - type: bind
-        source: ./server-accounts.json
-        target: /run/songcut/accounts.json
-        read_only: true
-        bind:
-          create_host_path: false
+      SONGCUT_USERS_JSON: ${SONGCUT_USERS_JSON:?Use scripts/deploy.sh or export the private account JSON}

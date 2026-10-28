@@ -72,6 +72,10 @@ if grep -q '^SONGCUT_RECORDER_ENABLED=1$' .env.server; then
     set -- "$@" -f deploy/compose.recorder.yaml
 fi
 if [ -f server-accounts.json ]; then
+    # Keep the host file private; the non-root container cannot read a 0600
+    # bind mount owned by a different host UID. Pass it as server-only config.
+    SONGCUT_USERS_JSON=$(cat server-accounts.json)
+    export SONGCUT_USERS_JSON
     set -- "$@" -f deploy/compose.accounts.yaml
 fi
 "$@" up -d --build --wait --wait-timeout 180

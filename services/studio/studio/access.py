@@ -23,8 +23,11 @@ class Access:
         self.server = server
         self.accounts = {server.username: {'password': server.password, 'role': 'admin'}} if server.enabled else {}
         filename = os.environ.get('SONGCUT_USERS_FILE')
-        if filename:
-            values = json.loads(Path(filename).read_text(encoding='utf-8'))
+        inline = os.environ.get('SONGCUT_USERS_JSON')
+        if filename and inline:
+            raise ValueError('Use only one account configuration source')
+        if filename or inline:
+            values = json.loads(inline if inline else Path(filename).read_text(encoding='utf-8'))
             if not isinstance(values, dict):
                 raise ValueError('SONGCUT_USERS_FILE must contain an account object')
             for name, value in values.items():

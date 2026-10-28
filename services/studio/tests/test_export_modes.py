@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 import subprocess
 import pytest
@@ -9,6 +10,8 @@ from studio.domain import Project, Clip, ExportSettings, SubtitleStyle, LyricCue
 @pytest.fixture
 def media_source(tmp_path):
     media = FFmpegMedia()
+    if not shutil.which(media.ffprobe):
+        pytest.skip("Real media checks require ffprobe")
     source = tmp_path/'source.mp4'
     subprocess.run([media.ffmpeg, '-v','error','-y','-f','lavfi','-i','testsrc2=size=128x72:rate=10',
                     '-f','lavfi','-i','sine=frequency=440:sample_rate=44100','-t','5','-c:v','libx264',
