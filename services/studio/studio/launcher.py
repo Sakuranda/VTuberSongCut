@@ -37,8 +37,8 @@ def main():
             sys.path.insert(0, str(script.parent))
             sys.argv = [str(script), *args]
             runpy.run_path(str(script), run_name="__main__")
-        elif kind in {"probe", "prepare"}:
-            module = "studio.model_probe" if kind == "probe" else "studio.training_worker"
+        elif kind in {"probe", "prepare", "infer-stream"}:
+            module = {"probe": "studio.model_probe", "prepare": "studio.training_worker", "infer-stream": "studio.inference_worker"}[kind]
             sys.argv = [module, *args]
             runpy.run_module(module, run_name="__main__")
         else:

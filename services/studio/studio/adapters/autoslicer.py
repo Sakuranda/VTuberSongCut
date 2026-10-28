@@ -5,6 +5,7 @@ import subprocess
 import sys
 from ..domain import Clip
 from ..runtime import worker_command
+from ..execution import run_process
 
 
 class AutoSlicerDetector:
@@ -19,14 +20,14 @@ class AutoSlicerDetector:
         if not self.checkpoint.is_file():
             raise RuntimeError("缺少声线模型，请先下载官方模型或配置模型路径")
         output.mkdir(parents=True, exist_ok=True)
-        command = worker_command("infer", ["--input", str(source),
+        command = worker_command("infer-stream" if self.device in {"cpu", "auto"} else "infer", ["--input", str(source),
                    "--checkpoint", str(self.checkpoint), "--out-dir", str(output), "--device", self.device], repository=self.repository, python=self.python)
         # Separate interpreter keeps upstream's flat module names out of the application.
         environment = os.environ.copy()
         environment["AUTOSLICER_FFMPEG"] = self.ffmpeg
         environment["PYTHONUTF8"] = "1"
         with (output / "detector.log").open("w", encoding="utf-8") as log:
-            result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=6*3600, env=environment, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            result = run_process(command, stdout=log, stderr=subprocess.STDOUT, timeout=6*3600, env=environment, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         if result.returncode:
             raise RuntimeError("检测失败，请查看任务目录中的 detector.log")
         data = json.loads((output / f"{source.stem}.segments.json").read_text(encoding="utf-8"))

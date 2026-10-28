@@ -47,7 +47,7 @@ def main():
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     workers = resources / "workers/studio"
     workers.mkdir(parents=True, exist_ok=True)
-    for filename in ("__init__.py", "runtime.py", "model_probe.py", "training_worker.py"):
+    for filename in ("__init__.py", "runtime.py", "model_probe.py", "training_worker.py", "inference_worker.py"):
         shutil.copy2(ROOT / "services/studio/studio" / filename, workers / filename)
     for filename in ("README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
         if (ROOT / filename).is_file():
@@ -131,7 +131,7 @@ def main():
                "--add-data", f"{resources}{os.pathsep}resources",
                "--add-binary", f"{bundle_ffmpeg}{os.pathsep}resources/bin",
                "--add-binary", f"{Path(ffprobe).resolve()}{os.pathsep}resources/bin",
-               "--hidden-import", "studio.model_probe", "--hidden-import", "studio.training_worker",
+               "--hidden-import", "studio.inference_worker", "--hidden-import", "studio.model_probe", "--hidden-import", "studio.training_worker",
                "--hidden-import", "torch.utils.tensorboard", "--hidden-import", "torchaudio.transforms",
                "--hidden-import", "requests", "--hidden-import", "scipy.ndimage", "--collect-all", "torchaudio",
                "--collect-submodules", "tensorboard",

@@ -48,7 +48,7 @@ def configure_runtime() -> None:
 
 def worker_command(kind: str, args: list[str], *, repository: Path | None = None,
                    python: str | None = None) -> list[str]:
-    if kind not in {"probe", "prepare", "train", "infer"}:
+    if kind not in {"probe", "prepare", "train", "infer", "infer-stream"}:
         raise ValueError(f"Unknown worker: {kind}")
     if frozen() and not python:
         command = [sys.executable, "--worker", kind]
@@ -61,7 +61,7 @@ def worker_command(kind: str, args: list[str], *, repository: Path | None = None
         script = repository / "src" / f"{kind}.py"
     else:
         script_root = resource_root() / "workers/studio" if frozen() else Path(__file__).parent
-        script = script_root / ("model_probe.py" if kind == "probe" else "training_worker.py")
-        if kind == "probe" and repository is not None:
+        script = script_root / {"probe": "model_probe.py", "prepare": "training_worker.py", "infer-stream": "inference_worker.py"}[kind]
+        if kind in {"probe", "infer-stream"} and repository is not None:
             args = ["--repository", str(repository), *args]
     return [python or sys.executable, "-u", str(script), *args]
