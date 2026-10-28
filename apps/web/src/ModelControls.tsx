@@ -7,6 +7,8 @@ export function ModelSelector({
   project,
   catalog,
   disabled = false,
+  trainingEnabled = true,
+  canImport = true,
   onChange,
   onTrain,
   onImport,
@@ -14,6 +16,8 @@ export function ModelSelector({
   project: Project | null;
   catalog: ModelCatalog | null;
   disabled?: boolean;
+  trainingEnabled?: boolean;
+  canImport?: boolean;
   onChange: (patch: {
     detector_model_id?: string | null;
     detector_device?: DetectorDevice;
@@ -87,7 +91,7 @@ export function ModelSelector({
                   onTrain();
                 }}
               >
-                去训练自己的模型
+                {trainingEnabled ? "去训练自己的模型" : "查看模型使用方式"}
               </button>
               <a href="/help/faq#models" target="_blank" rel="noreferrer">
                 查看使用说明 ↗
@@ -177,11 +181,17 @@ export function ModelSelector({
           </p>
         )}
       <div className="voice-model-entrypoints">
-        <button className="voice-text-button" type="button" onClick={onImport}>
-          导入模型
-        </button>
+        {canImport && (
+          <button
+            className="voice-text-button"
+            type="button"
+            onClick={onImport}
+          >
+            导入模型
+          </button>
+        )}
         <button className="voice-text-button" type="button" onClick={onTrain}>
-          训练模型 →
+          {trainingEnabled ? "训练模型 →" : "模型管理 →"}
         </button>
       </div>
     </section>

@@ -4,6 +4,10 @@ interface Props {
   value: ExportSettings;
   disabled: boolean;
   hasVideo?: boolean;
+  lowResource?: boolean;
+  sourceHeight?: number | null;
+  sourceFps?: number | null;
+  subtitleEnabled?: boolean;
   onChange: (value: ExportSettings) => void;
 }
 export function ExportControls({
@@ -11,9 +15,16 @@ export function ExportControls({
   disabled,
   onChange,
   hasVideo = true,
+  lowResource = false,
+  sourceHeight,
+  sourceFps,
+  subtitleEnabled = false,
 }: Props) {
   const update = (patch: Partial<ExportSettings>) =>
     onChange({ ...value, ...patch });
+  const fast = value.mode === "fast";
+  const fastTooLarge =
+    lowResource && ((sourceHeight || 0) > 1080 || (sourceFps || 0) > 30);
   return (
     <div className="export-controls">
       <fieldset className="format-picks" disabled={disabled}>
@@ -47,10 +58,53 @@ export function ExportControls({
           请至少选择一种输出文件。
         </p>
       )}
+      {hasVideo && (
+        <label className="field">
+          导出方式
+          <select
+            aria-label="导出方式"
+            disabled={disabled || !value.video}
+            value={value.mode || "precise"}
+            onChange={(event) => {
+              const mode = event.target.value as "precise" | "fast";
+              update(
+                mode === "fast"
+                  ? {
+                      mode,
+                      resolution: "source",
+                      fps: null,
+                      video_codec: "h264",
+                    }
+                  : { mode },
+              );
+            }}
+          >
+            <option value="precise">精确导出</option>
+            <option value="fast" disabled={fastTooLarge}>
+              快速导出（按关键帧裁切）
+            </option>
+          </select>
+          <small>
+            {fast
+              ? "保留原始画质，切点受关键帧影响，不烧录字幕。"
+              : "精确调整切点，可更改画质并烧录字幕。"}
+          </small>
+        </label>
+      )}
+      {fast && subtitleEnabled && value.video && (
+        <p className="settings-error" role="alert">
+          快速导出不能烧录字幕，请在「歌词与字幕」中关闭烧录，或切换精确导出。
+        </p>
+      )}
+      {lowResource && (
+        <p className="export-note">
+          服务器支持最高 1080p、30fps、H.264 导出。更高规格请在本地电脑完成。
+        </p>
+      )}
       <fieldset
         className="video-settings"
         hidden={!hasVideo}
-        disabled={disabled || !value.video || !hasVideo}
+        disabled={disabled || !value.video || !hasVideo || fast}
       >
         <legend>视频规格</legend>
         <label className="field">
@@ -65,7 +119,9 @@ export function ExportControls({
             }
           >
             <option value="h264">H.264 · 兼容性好</option>
-            <option value="hevc">HEVC / H.265 · 文件更小</option>
+            <option value="hevc" disabled={lowResource}>
+              HEVC / H.265 · 文件更小
+            </option>
           </select>
         </label>
         <label className="field">
@@ -78,10 +134,17 @@ export function ExportControls({
               })
             }
           >
-            <option value="source">保留原始分辨率</option>
+            <option
+              value="source"
+              disabled={lowResource && (sourceHeight || 0) > 1080}
+            >
+              保留原始分辨率
+            </option>
             <option value="720p">720p</option>
             <option value="1080p">1080p</option>
-            <option value="2160p">4K / 2160p</option>
+            <option value="2160p" disabled={lowResource}>
+              4K / 2160p
+            </option>
           </select>
         </label>
         <label className="field">
@@ -97,9 +160,14 @@ export function ExportControls({
               })
             }
           >
-            <option value="source">保留原始帧率</option>
+            <option
+              value="source"
+              disabled={lowResource && (sourceFps || 0) > 30}
+            >
+              保留原始帧率
+            </option>
             {[24, 25, 30, 50, 60].map((fps) => (
-              <option key={fps} value={fps}>
+              <option key={fps} value={fps} disabled={lowResource && fps > 30}>
                 {fps} fps
               </option>
             ))}
@@ -169,7 +237,11 @@ export function ExportControls({
             </option>
           ))}
         </select>
-        <small>用于视频中的声音与单独导出的 MP3。</small>
+        <small>
+          {fast
+            ? "用于单独导出的 MP3；快速导出视频保留原音轨。"
+            : "用于视频中的声音与单独导出的 MP3。"}
+        </small>
       </label>
       <p className="export-note">
         设置保存在当前歌曲片段中。修改后先保存，再开始导出。

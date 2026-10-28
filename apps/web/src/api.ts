@@ -13,6 +13,7 @@ export interface Subtitle {
   margin_bottom: number;
 }
 export interface ExportSettings {
+  mode?: "precise" | "fast";
   video: boolean;
   audio: boolean;
   video_codec: "h264" | "hevc";
@@ -118,6 +119,17 @@ export interface Project {
   source_fps: number | null;
   has_video: boolean;
   preview_file: string | null;
+  preview_profile?: string | null;
+  high_preview_file?: string | null;
+  source_width?: number | null;
+  source_height?: number | null;
+  source_browser_compatible?: boolean;
+  owner?: string | null;
+  shared?: boolean;
+  source_project_id?: string | null;
+  can_edit?: boolean;
+  can_clone?: boolean;
+  recording?: Record<string, unknown> | null;
   clips: Clip[];
   detector_model_id: string | null;
   detector_device: DetectorDevice;
@@ -126,7 +138,15 @@ export interface Job {
   id: string;
   project_id: string;
   kind: string;
-  status: "queued" | "running" | "succeeded" | "failed" | "interrupted";
+  owner?: string | null;
+  task?: { profile?: PreviewQuality };
+  status:
+    | "queued"
+    | "running"
+    | "succeeded"
+    | "failed"
+    | "interrupted"
+    | "cancelled";
   message: string;
   progress?: number;
   artifacts: string[];
@@ -145,7 +165,45 @@ export interface CacheCleanup extends CacheReport {
   removed_files: number;
   failed_files: number;
 }
+export type PreviewQuality = "low" | "high";
+export interface RecorderStatus {
+  disk_warning?: string;
+  enabled: boolean;
+  connected: boolean;
+  max_rooms: number;
+  queue_limit: number;
+  counts: Record<string, number>;
+  message: string;
+}
+export interface RecorderRoom {
+  room_id: number;
+  name: string;
+  title: string;
+  auto_record: boolean;
+  recording: boolean;
+  streaming: boolean;
+}
+export interface Recording {
+  id: string;
+  room_id: number;
+  session_id: string;
+  name: string;
+  title: string;
+  opened_at: string;
+  closed_at: string;
+  expected_size: number;
+  duration: number;
+  status: "queued" | "importing" | "ready" | "failed";
+  attempts: number;
+  project_id: string | null;
+  error: string;
+}
 export interface Capabilities {
+  user?: string;
+  role?: "admin" | "editor" | "viewer";
+  training_enabled?: boolean;
+  low_resource?: boolean;
+  export_max_seconds?: number;
   detector_ready: boolean;
   ffmpeg: boolean;
   ffprobe: boolean;
@@ -440,6 +498,25 @@ export function projectEdits(project: Project) {
   };
 }
 export const api = {
+  recorderStatus: (signal?: AbortSignal) =>
+    request<RecorderStatus>("/recorder/status", { signal }),
+  recorderRooms: (signal?: AbortSignal) =>
+    request<RecorderRoom[]>("/recorder/rooms", { signal }),
+  recordings: (signal?: AbortSignal) =>
+    request<Recording[]>("/recordings", { signal }),
+  addRecorderRoom: (room_id: number) =>
+    post<RecorderRoom>("/recorder/rooms", { room_id, auto_record: true }),
+  configureRecorderRoom: (room_id: number, auto_record: boolean) =>
+    request<RecorderRoom>(`/recorder/rooms/${room_id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auto_record }),
+    }),
+  recorderAction: (room_id: number, action: "start" | "stop") =>
+    post<RecorderRoom>(`/recorder/rooms/${room_id}/${action}`),
+  retryRecording: (id: string) => post(`/recordings/${id}/retry`),
+  clone: (id: string) => post<Project>(`/projects/${id}/clone`),
+  cancelJob: (id: string) => post<Job>(`/jobs/${id}/cancel`),
   cache: (signal?: AbortSignal) => request<CacheReport>("/cache", { signal }),
   cleanCache: () => request<CacheCleanup>("/cache/clean", { method: "POST" }),
   trainingDatasets: () => request<TrainingDataset[]>("/training/datasets"),
@@ -535,13 +612,14 @@ export const api = {
       }),
     }),
   detect: (id: string) => post<Job>(`/projects/${id}/detect`),
-  preview: (id: string) => post<Job>(`/projects/${id}/preview`),
+  preview: (id: string, profile: PreviewQuality = "low") =>
+    post<Job>(`/projects/${id}/preview`, { profile }),
   export: (id: string, clip: string) =>
     post<Job>(`/projects/${id}/clips/${clip}/export`),
   lyrics: (id: string, clip: string, text: string, offset_ms: number) =>
     post<Project>(`/projects/${id}/clips/${clip}/lyrics`, { text, offset_ms }),
-  media: (project: Project) =>
-    `/api/projects/${project.id}/media?v=${encodeURIComponent(project.preview_file || "source")}`,
+  media: (project: Project, quality: PreviewQuality = "low") =>
+    `/api/projects/${project.id}/media?quality=${quality}&v=${encodeURIComponent(((quality === "high" ? project.high_preview_file : project.preview_file) || "source").split(/[\\/]/).pop() || "source")}`,
   artifact: (job: Job, name: string) =>
     `/api/artifacts/${job.id}/${encodeURIComponent(name)}`,
 };

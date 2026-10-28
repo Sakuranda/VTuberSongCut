@@ -21,6 +21,9 @@ import { Timeline } from "./Timeline";
 import { TimecodeInput } from "./TimecodeInput";
 import { ExportControls } from "./ExportControls";
 import { ModelSelector, ModelManager } from "./ModelControls";
+import { RecordingsWorkspace } from "./RecordingsWorkspace";
+import { previewReady, mergePreviewMetadata } from "./playback";
+import type { PreviewQuality } from "./api";
 import { TrainingWorkspace } from "./TrainingWorkspace";
 import { UploadFeedback } from "./UploadFeedback";
 import type { FileUploadState } from "./UploadFeedback";
@@ -49,6 +52,7 @@ const statuses: Record<Job["status"], string> = {
   succeeded: "已完成",
   failed: "失败",
   interrupted: "已中断",
+  cancelled: "已取消",
 };
 function Icon({
   name,
@@ -120,7 +124,9 @@ function App() {
     useAppearance();
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [cacheOpen, setCacheOpen] = useState(false);
-  const [workspace, setWorkspace] = useState<"cut" | "training">("cut");
+  const [workspace, setWorkspace] = useState<"cut" | "training" | "recordings">(
+    "cut",
+  );
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
   const [catalogError, setCatalogError] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
@@ -137,6 +143,26 @@ function App() {
   const [refreshPending, setRefreshPending] = useState(false);
   const [now, setNow] = useState(0);
   const [mediaError, setMediaError] = useState(false);
+  const [playbackChoice, setPlaybackChoice] = useState<{
+    id: string;
+    quality: PreviewQuality;
+  }>({ id: "", quality: "low" });
+  const quality: PreviewQuality =
+    playbackChoice.id === project?.id ? playbackChoice.quality : "low";
+  const ready = !!project && previewReady(project, quality);
+  const [previewFailure, setPreviewFailure] = useState<{
+    key: string;
+    message: string;
+  } | null>(null);
+  const previewRequests = useRef(new Set<string>());
+  const [mediaEpoch, setMediaEpoch] = useState(0);
+  const playbackPosition = useRef({ id: "", time: 0 });
+  const canPrepare = !!caps;
+  const canCreate = !!caps && caps.role !== "viewer";
+  const canManage = !!caps && (!caps.role || caps.role === "admin");
+  const canTrain = canManage && caps?.training_enabled !== false;
+  const canEdit =
+    !!project && caps?.role !== "viewer" && project.can_edit !== false;
   const [lrc, setLrc] = useState("");
   const [offset, setOffset] = useState(0);
   const [tab, setTab] = useState<"details" | "lyrics" | "export">("details");
@@ -154,6 +180,7 @@ function App() {
   const live = useRef({ project, dirty, busy });
   live.current = { project, dirty, busy };
   const previousJobs = useRef<Job[]>([]);
+  const loadGeneration = useRef(0);
   const clip = project?.clips.find((c) => c.id === selected);
   const activeJobs = jobs.filter((j) => j.project_id === project?.id);
   const previewJob = activeJobs.find(
@@ -163,7 +190,8 @@ function App() {
   const processing = activeJobs.some(
     (j) => j.status === "running" || j.status === "queued",
   );
-  const blocked = !!busy || dirty || conflict || processing || invalidTime;
+  const blocked =
+    !canEdit || !!busy || dirty || conflict || processing || invalidTime;
   const detectorModel = catalog?.models.find(
     (model) => model.id === project?.detector_model_id,
   );
@@ -174,7 +202,7 @@ function App() {
     !!catalog?.engine_ready &&
     !!detectorModel?.available &&
     !!detectorDevice?.available;
-  function switchWorkspace(next: "cut" | "training") {
+  function switchWorkspace(next: "cut" | "training" | "recordings") {
     media.current?.pause();
     setWorkspace(next);
     window.scrollTo({ top: 0 });
@@ -196,6 +224,10 @@ function App() {
     }
   }
   async function useModel(model: ModelInfo) {
+    if (project && !canEdit) {
+      setError("请先创建自己的剪辑，再选择模型。");
+      return;
+    }
     await refreshCatalog();
     switchWorkspace("cut");
     pendingModelId.current = live.current.project ? null : model.id;
@@ -223,6 +255,23 @@ function App() {
     project && !project.has_video
       ? { ...savedOutput, video: false }
       : savedOutput;
+  const exportIssue =
+    clip && caps && project
+      ? caps.export_max_seconds &&
+        clip.end_ms - clip.start_ms > caps.export_max_seconds * 1000
+        ? `单次导出最长 ${Math.floor(caps.export_max_seconds / 60)} 分钟，请缩短片段。`
+        : output.video && output.mode === "fast" && clip.subtitle.enabled
+          ? "快速导出不能烧录字幕，请关闭字幕或选择精确导出。"
+          : caps.low_resource &&
+              output.video &&
+              (output.video_codec !== "h264" ||
+                output.resolution === "2160p" ||
+                (output.resolution === "source" &&
+                  (project.source_height || 0) > 1080) ||
+                (output.fps ?? project.source_fps ?? 0) > 30)
+            ? "请在导出设置中选择最高1080p、30fps、H.264。"
+            : ""
+      : "";
   const outputLabel =
     [output.video && "MP4", output.audio && "MP3"]
       .filter(Boolean)
@@ -240,26 +289,101 @@ function App() {
     setRefreshPending(false);
     setProjects((list) => [p, ...list.filter((x) => x.id !== p.id)]);
   }
-  async function load(id: string) {
+  async function load(id: string, errorInCaller = false): Promise<boolean> {
     if (
       live.current.dirty &&
       !window.confirm("当前修改尚未保存。放弃修改并打开项目？")
     )
-      return;
+      return false;
+    const generation = ++loadGeneration.current;
     setBusy("打开项目");
     setError("");
     try {
-      accept(await api.project(id), false);
+      const fresh = await api.project(id);
+      if (generation !== loadGeneration.current) return false;
+      accept(fresh, false);
+      setPlaybackChoice({ id, quality: "low" });
+      playbackPosition.current = { id, time: 0 };
       setMediaError(false);
       setNow(0);
+      return true;
     } catch (e) {
+      if (generation !== loadGeneration.current) return false;
+      if (errorInCaller) throw e;
       fail(e);
+      return false;
     } finally {
-      setBusy("");
+      if (generation === loadGeneration.current) setBusy("");
     }
   }
   function fail(e: unknown) {
     setError(e instanceof Error ? e.message : "操作未完成，请重试");
+  }
+  async function refreshPreview(id: string, signal?: AbortSignal) {
+    const fresh = await api.project(id, signal);
+    if (!signal?.aborted && live.current.project?.id === id) {
+      setProject((current) =>
+        current?.id === id ? mergePreviewMetadata(current, fresh) : current,
+      );
+      setMediaError(false);
+      setMediaEpoch((value) => value + 1);
+    }
+  }
+  async function requestPreview(
+    p: Project,
+    profile: PreviewQuality,
+    retry = false,
+  ) {
+    const key = `${p.id}:${profile}`;
+    if (!canPrepare || (previewRequests.current.has(key) && !retry)) return;
+    previewRequests.current.add(key);
+    setPreviewFailure(null);
+    try {
+      const job = await api.preview(p.id, profile);
+      if (live.current.project?.id !== p.id) return;
+      setJobs((items) => [job, ...items.filter((item) => item.id !== job.id)]);
+      previousJobs.current = [
+        job,
+        ...previousJobs.current.filter((item) => item.id !== job.id),
+      ];
+      if (job.status === "succeeded") await refreshPreview(p.id);
+    } catch (error) {
+      if (live.current.project?.id === p.id)
+        setPreviewFailure({
+          key,
+          message:
+            error instanceof Error ? error.message : "预览准备失败，请重试",
+        });
+    }
+  }
+  useEffect(() => {
+    if (workspace === "cut" && project && !ready && canPrepare)
+      void requestPreview(project, quality);
+  }, [workspace, project?.id, quality, ready, canPrepare]);
+  async function cloneProject() {
+    if (!project || !canCreate || busy) return;
+    if (dirty && !window.confirm("当前修改尚未保存。放弃修改并创建剪辑副本？"))
+      return;
+    setBusy("创建剪辑");
+    setError("");
+    try {
+      accept(await api.clone(project.id), false);
+      setNotice("已创建你的剪辑副本，可以独立编辑。");
+    } catch (error) {
+      fail(error);
+    } finally {
+      setBusy("");
+    }
+  }
+  async function cancelJob(job: Job) {
+    try {
+      const result = await api.cancelJob(job.id);
+      setJobs((items) =>
+        items.map((item) => (item.id === result.id ? result : item)),
+      );
+    } catch (error) {
+      fail(error);
+    }
   }
   useEffect(() => {
     let stopped = false;
@@ -322,13 +446,49 @@ function App() {
                 (old) => old.id === j.id && old.status !== "succeeded",
               ),
           );
-        if (changed && p) {
-          if (live.current.dirty || live.current.busy) setRefreshPending(true);
-          else {
-            const fresh = await api.project(p.id, signal);
-            if (!signal.aborted && live.current.project?.id === fresh.id) {
-              if (!live.current.dirty && !live.current.busy) accept(fresh);
-              else setRefreshPending(true);
+        const completedPreviews =
+          p &&
+          items.some(
+            (j) =>
+              j.project_id === p.id &&
+              j.kind === "preview" &&
+              j.status === "succeeded",
+          );
+        if (
+          p &&
+          (changed || (!previewReady(p, quality) && completedPreviews))
+        ) {
+          const fresh = await api.project(p.id, signal);
+          if (!signal.aborted && live.current.project?.id === fresh.id) {
+            const changedEdits = items.some(
+              (j) =>
+                j.project_id === p.id &&
+                j.kind !== "preview" &&
+                j.status === "succeeded" &&
+                previousJobs.current.some(
+                  (old) => old.id === j.id && old.status !== "succeeded",
+                ),
+            );
+            if (live.current.dirty || live.current.busy) {
+              setProject((current) =>
+                current?.id === fresh.id
+                  ? mergePreviewMetadata(current, fresh)
+                  : current,
+              );
+              if (changedEdits) setRefreshPending(true);
+            } else accept(fresh);
+            if (
+              items.some(
+                (j) =>
+                  j.kind === "preview" &&
+                  j.status === "succeeded" &&
+                  previousJobs.current.some(
+                    (old) => old.id === j.id && old.status !== "succeeded",
+                  ),
+              )
+            ) {
+              setMediaError(false);
+              setMediaEpoch((value) => value + 1);
             }
           }
         }
@@ -360,7 +520,7 @@ function App() {
     setInvalidTimes({});
   }, [selected, project?.id]);
   function updateClip(values: Partial<Clip>) {
-    if (!project || !clip) return;
+    if (!canEdit || !project || !clip) return;
     setProject({
       ...project,
       clips: project.clips.map((c) =>
@@ -373,10 +533,11 @@ function App() {
     if (!project || !Number.isFinite(ms)) return;
     const bounded = Math.max(0, Math.min(project.duration_ms, Math.round(ms)));
     setNow(bounded);
+    playbackPosition.current = { id: project.id, time: bounded / 1000 };
     if (media.current) media.current.currentTime = bounded / 1000;
   }
   function boundary(edge: "start_ms" | "end_ms", ms: number) {
-    if (!clip || !project || !Number.isFinite(ms)) return;
+    if (!canEdit || !clip || !project || !Number.isFinite(ms)) return;
     updateClip({
       [edge]: Math.round(
         Math.max(
@@ -409,7 +570,7 @@ function App() {
         return;
       const key = event.key.toLowerCase();
       if (key === "i" || key === "o") {
-        if (!clip || busy || invalidTime) return;
+        if (!canEdit || !clip || busy || invalidTime) return;
         event.preventDefault();
         boundary(
           key === "i" ? "start_ms" : "end_ms",
@@ -438,9 +599,19 @@ function App() {
     }
     window.addEventListener("keydown", shortcuts);
     return () => window.removeEventListener("keydown", shortcuts);
-  }, [workspace, project, clip, now, busy, invalidTime, fps, mediaError]);
+  }, [
+    workspace,
+    project,
+    clip,
+    now,
+    busy,
+    invalidTime,
+    fps,
+    mediaError,
+    canEdit,
+  ]);
   async function save() {
-    if (!project) return;
+    if (!project || !canEdit) return;
     if (invalidTime) {
       setError("请先修正入点或出点的时间戳。");
       return;
@@ -467,7 +638,7 @@ function App() {
     }
   }
   async function importVideo(file?: File) {
-    if (!file) return;
+    if (!file || !canCreate) return;
     if (dirty && !window.confirm("当前修改尚未保存。放弃修改并导入视频？"))
       return;
     setUploadState({
@@ -548,7 +719,7 @@ function App() {
     }
   }
   function addClip() {
-    if (!project) return;
+    if (!project || !canEdit) return;
     const start = Math.min(
       Math.round(now),
       Math.max(0, project.duration_ms - 1),
@@ -563,7 +734,19 @@ function App() {
       detection: "manual",
       candidates: [],
       lyrics: [],
-      export_settings: { ...DEFAULT_EXPORT_SETTINGS, video: project.has_video },
+      export_settings: {
+        ...DEFAULT_EXPORT_SETTINGS,
+        video: project.has_video,
+        ...(caps?.low_resource
+          ? {
+              resolution:
+                (project.source_height || 0) > 1080
+                  ? ("1080p" as const)
+                  : ("source" as const),
+              fps: (project.source_fps || 0) > 30 ? (30 as const) : null,
+            }
+          : {}),
+      },
       subtitle: {
         enabled: false,
         layout: "single",
@@ -614,7 +797,7 @@ function App() {
               <span className="local-label">工作空间</span>
               <button
                 className="button primary"
-                disabled={!!busy || processing}
+                disabled={!!busy || processing || !canCreate}
                 onClick={() => upload.current?.click()}
               >
                 <Icon name="upload" size={17} />
@@ -680,7 +863,14 @@ function App() {
               switchWorkspace("training");
             }}
           >
-            模型训练
+            {canTrain ? "模型训练" : "模型管理"}
+          </button>
+          <button
+            className={workspace === "recordings" ? "active" : ""}
+            aria-current={workspace === "recordings" ? "page" : undefined}
+            onClick={() => switchWorkspace("recordings")}
+          >
+            录播库
           </button>
         </nav>
         <main>
@@ -689,7 +879,7 @@ function App() {
               <div>
                 <h2>{project ? project.name : "录播切歌"}</h2>
               </div>
-              {project && (
+              {project && canEdit && (
                 <div className="save-group">
                   <span className={dirty ? "unsaved" : "saved"}>
                     {dirty ? "● 有未保存修改" : "✓ 修改已保存"}
@@ -704,6 +894,20 @@ function App() {
                 </div>
               )}
             </div>
+            {project && !canEdit && (
+              <div className="banner info readonly-note">
+                <span>正在浏览共享录播，原始内容保持不变。</span>
+                {project.can_clone && canCreate && (
+                  <button
+                    className="button"
+                    disabled={!!busy}
+                    onClick={() => void cloneProject()}
+                  >
+                    创建我的剪辑
+                  </button>
+                )}
+              </div>
+            )}
             {startupError && (
               <div className="banner error" role="alert">
                 <span>项目列表暂时无法读取：{startupError}</span>
@@ -769,7 +973,7 @@ function App() {
             <UploadFeedback
               state={uploadState}
               onRetry={() => upload.current?.click()}
-              disabled={!!busy || processing}
+              disabled={!!busy || processing || !canCreate}
             />
             <div className={`workbench${!project ? " first-use" : ""}`}>
               <section className="panel library">
@@ -811,10 +1015,12 @@ function App() {
                   </div>
                 )}
                 <ModelSelector
+                  trainingEnabled={canTrain}
+                  canImport={canManage}
                   onImport={openModelLibrary}
                   project={project}
                   catalog={catalog}
-                  disabled={!!busy || processing}
+                  disabled={!!busy || processing || !canEdit}
                   onChange={(patch) => {
                     setProject((current) =>
                       current ? { ...current, ...patch } : current,
@@ -845,7 +1051,7 @@ function App() {
                   <button
                     className="icon-button"
                     onClick={addClip}
-                    disabled={!project || !!busy || processing}
+                    disabled={!project || !canEdit || !!busy}
                     aria-label="在播放位置添加片段"
                     title="在播放位置添加片段"
                   >
@@ -932,29 +1138,108 @@ function App() {
                 <section className="panel preview-panel">
                   <div className="panel-heading">
                     <h3>画面预览</h3>
-                    <span className="small muted">
-                      {project ? "原始素材时间" : "等待导入素材"}
-                    </span>
+                    {project?.has_video ? (
+                      <label className="preview-quality">
+                        清晰度
+                        <select
+                          aria-label="预览清晰度"
+                          value={quality}
+                          onChange={(event) => {
+                            playbackPosition.current = {
+                              id: project.id,
+                              time: media.current?.currentTime ?? now / 1000,
+                            };
+                            setPlaybackChoice({
+                              id: project.id,
+                              quality: event.target.value as PreviewQuality,
+                            });
+                            setMediaError(false);
+                          }}
+                        >
+                          <option value="low">省流 320p</option>
+                          <option value="high">高清（最高1080p）</option>
+                        </select>
+                      </label>
+                    ) : (
+                      <span className="small muted">
+                        {project ? "原始素材时间" : "等待导入素材"}
+                      </span>
+                    )}
                   </div>
                   <div
                     className={`video-stage ${!project ? "empty-stage" : ""}`}
                   >
                     {project ? (
                       <>
-                        <video
-                          key={`${project.id}-${project.preview_file}`}
-                          ref={media}
-                          src={api.media(project)}
-                          controls
-                          preload="metadata"
-                          onTimeUpdate={(e) =>
-                            setNow(
-                              Math.round(e.currentTarget.currentTime * 1000),
-                            )
-                          }
-                          onError={() => setMediaError(true)}
-                          onLoadedData={() => setMediaError(false)}
-                        />
+                        {ready ? (
+                          <video
+                            key={`${project.id}-${quality}-${quality === "high" ? project.high_preview_file : project.preview_file}-${mediaEpoch}`}
+                            ref={media}
+                            src={api.media(project, quality)}
+                            controls
+                            preload="metadata"
+                            onLoadedMetadata={(event) => {
+                              const position = playbackPosition.current;
+                              const time =
+                                position.id === project.id ? position.time : 0;
+                              event.currentTarget.currentTime = Math.min(
+                                time,
+                                event.currentTarget.duration || time,
+                              );
+                              setNow(Math.round(time * 1000));
+                            }}
+                            onTimeUpdate={(e) => {
+                              if (e.currentTarget.readyState < 1) return;
+                              playbackPosition.current = {
+                                id: project.id,
+                                time: e.currentTarget.currentTime,
+                              };
+                              setNow(
+                                Math.round(e.currentTarget.currentTime * 1000),
+                              );
+                            }}
+                            onError={() => setMediaError(true)}
+                            onLoadedData={() => setMediaError(false)}
+                          />
+                        ) : (
+                          <div className="preview-waiting">
+                            <strong>
+                              {quality === "low"
+                                ? previewJob
+                                  ? "正在准备省流预览"
+                                  : "省流预览尚未就绪"
+                                : "高清预览尚未准备好"}
+                            </strong>
+                            <p>
+                              {previewFailure?.key ===
+                              `${project.id}:${quality}`
+                                ? previewFailure.message
+                                : previewJob?.message ||
+                                  activeJobs.find(
+                                    (job) =>
+                                      job.kind === "preview" &&
+                                      [
+                                        "failed",
+                                        "interrupted",
+                                        "cancelled",
+                                      ].includes(job.status),
+                                  )?.message ||
+                                  (canPrepare
+                                    ? "预览准备好后会自动显示。"
+                                    : "正在读取工作空间，请稍候。")}
+                            </p>
+                            {canPrepare && !previewJob && (
+                              <button
+                                className="button"
+                                onClick={() =>
+                                  void requestPreview(project, quality, true)
+                                }
+                              >
+                                重新准备预览
+                              </button>
+                            )}
+                          </div>
+                        )}
                         {!project.has_video && (
                           <div className="audio-note">
                             <Icon name="music" size={42} />
@@ -973,14 +1258,18 @@ function App() {
                             {lyric.text}
                           </div>
                         )}
-                        {mediaError && (
+                        {ready && mediaError && (
                           <div className="media-error">
                             <strong>浏览器暂时无法播放此素材</strong>
                             <p>生成兼容预览后继续剪辑，原始素材会用于导出。</p>
                             <button
                               className="button primary"
-                              disabled={blocked || !caps?.ffmpeg}
-                              onClick={() => void run("preview")}
+                              disabled={
+                                !canPrepare || !!previewJob || !caps?.ffmpeg
+                              }
+                              onClick={() =>
+                                void requestPreview(project, quality, true)
+                              }
                             >
                               生成兼容预览
                             </button>
@@ -991,7 +1280,7 @@ function App() {
                       <SkinWelcome
                         decorated={appearance.skin === "catgirl"}
                         loading={loading}
-                        busy={!!busy}
+                        busy={!!busy || !canCreate}
                         onImport={() => upload.current?.click()}
                         onModels={openModelLibrary}
                       />
@@ -999,7 +1288,7 @@ function App() {
                   </div>
                   {previewJob && (
                     <OperationProgress
-                      title="正在生成兼容预览"
+                      title={previewJob.message || "正在准备预览"}
                       percent={
                         typeof previewJob.progress === "number"
                           ? Math.min(99, Math.floor(previewJob.progress * 100))
@@ -1014,7 +1303,7 @@ function App() {
                       now={now}
                       clip={clip}
                       fps={fps}
-                      disabled={!!busy}
+                      disabled={!!busy || !canEdit}
                       onSeek={seek}
                       onBoundary={boundary}
                     />
@@ -1025,7 +1314,11 @@ function App() {
                       <code>{format(now)}</code>
                     </span>
                     <span className="small muted">
-                      {project?.preview_file ? "兼容预览" : "原始画面"}
+                      {!project?.has_video
+                        ? "原始音频"
+                        : quality === "low"
+                          ? "省流预览 · 最高320p"
+                          : `高清预览 · 最高${Math.min(1080, project.source_height || 1080)}p`}
                     </span>
                   </div>
                 </section>
@@ -1052,7 +1345,7 @@ function App() {
                               </label>
                               <button
                                 onClick={() => boundary(edge, now)}
-                                disabled={!!busy}
+                                disabled={!!busy || !canEdit}
                               >
                                 使用播放位置
                               </button>
@@ -1067,7 +1360,7 @@ function App() {
                                     ? clip.end_ms - 1
                                     : project.duration_ms
                                 }
-                                disabled={!!busy}
+                                disabled={!!busy || !canEdit}
                                 onChange={(value) => boundary(edge, value)}
                                 onValidity={(invalid) =>
                                   setInvalidTimes((previous) =>
@@ -1087,7 +1380,7 @@ function App() {
                             </div>
                             <div className="frame-nudges">
                               <button
-                                disabled={!!busy}
+                                disabled={!!busy || !canEdit}
                                 aria-label={`${i === 0 ? "入点" : "出点"}前移一帧`}
                                 onClick={() =>
                                   boundary(
@@ -1099,7 +1392,7 @@ function App() {
                                 ← 1 帧
                               </button>
                               <button
-                                disabled={!!busy}
+                                disabled={!!busy || !canEdit}
                                 aria-label={`${i === 0 ? "入点" : "出点"}后移一帧`}
                                 onClick={() =>
                                   boundary(
@@ -1143,6 +1436,16 @@ function App() {
                             </span>
                           </div>
                           <p>{j.message || "等待任务处理"}</p>
+                          {["queued", "running"].includes(j.status) &&
+                            (canManage ||
+                              (!!caps?.user && j.owner === caps.user)) && (
+                              <button
+                                className="button"
+                                onClick={() => void cancelJob(j)}
+                              >
+                                取消任务
+                              </button>
+                            )}
                           {(j.model_name || j.model_id) && (
                             <p>
                               实际检测模型：
@@ -1228,7 +1531,11 @@ function App() {
                         <ExportControls
                           value={output}
                           hasVideo={project?.has_video}
-                          disabled={!!busy}
+                          lowResource={caps?.low_resource}
+                          sourceHeight={project?.source_height}
+                          sourceFps={project?.source_fps}
+                          subtitleEnabled={clip.subtitle.enabled}
+                          disabled={!!busy || !canEdit}
                           onChange={(export_settings) =>
                             updateClip({ export_settings })
                           }
@@ -1243,7 +1550,7 @@ function App() {
                             <input
                               value={clip.title}
                               placeholder="填写歌曲名称"
-                              disabled={!!busy}
+                              disabled={!!busy || !canEdit}
                               onChange={(e) =>
                                 updateClip({ title: e.target.value })
                               }
@@ -1254,7 +1561,7 @@ function App() {
                             <input
                               value={clip.original_artist}
                               placeholder="填写原唱歌手"
-                              disabled={!!busy}
+                              disabled={!!busy || !canEdit}
                               onChange={(e) =>
                                 updateClip({ original_artist: e.target.value })
                               }
@@ -1265,7 +1572,7 @@ function App() {
                             <input
                               value={clip.performer}
                               placeholder="填写本场演唱者"
-                              disabled={!!busy}
+                              disabled={!!busy || !canEdit}
                               onChange={(e) =>
                                 updateClip({ performer: e.target.value })
                               }
@@ -1286,7 +1593,7 @@ function App() {
                           </div>
                           <button
                             className="delete-button"
-                            disabled={!!busy || processing}
+                            disabled={!!busy || processing || !canEdit}
                             onClick={() => {
                               if (
                                 window.confirm(
@@ -1369,7 +1676,9 @@ function App() {
                             <input
                               type="checkbox"
                               checked={clip.subtitle.enabled}
-                              disabled={!!busy || !caps?.subtitle_burn}
+                              disabled={
+                                !!busy || !canEdit || !caps?.subtitle_burn
+                              }
                               onChange={(e) =>
                                 updateClip({
                                   subtitle: {
@@ -1389,7 +1698,7 @@ function App() {
                             字幕样式
                             <select
                               value={clip.subtitle.layout}
-                              disabled={!!busy}
+                              disabled={!!busy || !canEdit}
                               onChange={(e) =>
                                 updateClip({
                                   subtitle: {
@@ -1413,7 +1722,7 @@ function App() {
                                 min={16}
                                 max={100}
                                 value={clip.subtitle.font_size}
-                                disabled={!!busy}
+                                disabled={!!busy || !canEdit}
                                 onChange={(e) =>
                                   updateClip({
                                     subtitle: {
@@ -1431,7 +1740,7 @@ function App() {
                                 min={0}
                                 max={400}
                                 value={clip.subtitle.margin_bottom}
-                                disabled={!!busy}
+                                disabled={!!busy || !canEdit}
                                 onChange={(e) =>
                                   updateClip({
                                     subtitle: {
@@ -1449,7 +1758,7 @@ function App() {
                               <input
                                 type="color"
                                 value={clip.subtitle.color}
-                                disabled={!!busy}
+                                disabled={!!busy || !canEdit}
                                 onChange={(e) =>
                                   updateClip({
                                     subtitle: {
@@ -1465,7 +1774,7 @@ function App() {
                               <input
                                 type="color"
                                 value={clip.subtitle.highlight}
-                                disabled={!!busy}
+                                disabled={!!busy || !canEdit}
                                 onChange={(e) =>
                                   updateClip({
                                     subtitle: {
@@ -1507,6 +1816,7 @@ function App() {
                         className="button primary full"
                         disabled={
                           blocked ||
+                          !!exportIssue ||
                           !caps?.ffmpeg ||
                           (!output.video && !output.audio)
                         }
@@ -1524,17 +1834,18 @@ function App() {
                         </button>
                       )}
                       <p>
-                        {dirty
-                          ? "先保存修改，再导出当前片段"
-                          : processing
-                            ? "任务处理中，完成后可继续操作"
-                            : capabilitiesLoading
-                              ? "正在检查媒体工具…"
-                              : capabilityError && !caps
-                                ? "媒体工具检查失败，请在上方重试"
-                                : !caps?.ffmpeg
-                                  ? "请先安装 FFmpeg 以启用导出"
-                                  : "当前片段 · 输出文件保存在本地"}
+                        {exportIssue ||
+                          (dirty
+                            ? "先保存修改，再导出当前片段"
+                            : processing
+                              ? "任务处理中，完成后可继续操作"
+                              : capabilitiesLoading
+                                ? "正在检查媒体工具…"
+                                : capabilityError && !caps
+                                  ? "媒体工具检查失败，请在上方重试"
+                                  : !caps?.ffmpeg
+                                    ? "请先安装 FFmpeg 以启用导出"
+                                    : "当前片段 · 输出文件保存在本地")}
                       </p>
                     </div>
                   </>
@@ -1548,24 +1859,61 @@ function App() {
               </section>
             </div>
           </div>
-          <TrainingWorkspace
-            active={workspace === "training"}
-            catalog={catalog}
-            onModelsChanged={() => void refreshCatalog()}
-            onUseModel={(model) => void useModel(model)}
-            modelManager={
-              <ModelManager
-                catalog={catalog}
-                onImported={async () => {
-                  await refreshCatalog();
-                }}
-                onUse={(model) => void useModel(model)}
-              />
-            }
+          <RecordingsWorkspace
+            active={workspace === "recordings"}
+            admin={canManage}
+            onOpen={async (id) => {
+              if (await load(id, true)) switchWorkspace("cut");
+            }}
           />
+          {canTrain ? (
+            <TrainingWorkspace
+              active={workspace === "training"}
+              catalog={catalog}
+              onModelsChanged={() => void refreshCatalog()}
+              onUseModel={(model) => void useModel(model)}
+              modelManager={
+                <ModelManager
+                  catalog={catalog}
+                  onImported={async () => {
+                    await refreshCatalog();
+                  }}
+                  onUse={(model) => void useModel(model)}
+                />
+              }
+            />
+          ) : (
+            <section
+              className="server-models"
+              hidden={workspace !== "training"}
+              aria-label="模型管理工作区"
+            >
+              <h2>模型管理</h2>
+              <p>模型训练请在本地完成，服务器使用训练好的模型检测演唱片段。</p>
+              {canManage ? (
+                <ModelManager
+                  catalog={catalog}
+                  onImported={async () => {
+                    await refreshCatalog();
+                  }}
+                  onUse={(model) => void useModel(model)}
+                />
+              ) : (
+                <p>请联系管理员导入模型。已有模型可以在切歌工作区选择。</p>
+              )}
+            </section>
+          )}
           <footer className="app-footer">
             <span>拾歌 · VTuber SongCut</span>
-            <button className="cache-link" aria-haspopup="dialog" onClick={() => setCacheOpen(true)}>缓存管理</button>
+            {canManage && (
+              <button
+                className="cache-link"
+                aria-haspopup="dialog"
+                onClick={() => setCacheOpen(true)}
+              >
+                缓存管理
+              </button>
+            )}
             <a href="/help/faq" target="_blank" rel="noreferrer">
               使用帮助 ↗
             </a>

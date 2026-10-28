@@ -126,7 +126,7 @@ export function CacheSettings({
           天的可清理缓存会在服务启动后及运行期间每小时自动检查回收。
         </p>
         <p className="cache-browser-note">
-          网页请求不缓存媒体和接口数据。页面图片等静态资源由浏览器管理；这里不会清除皮肤偏好。
+          视频预览会短暂缓存，方便拖动和回看；页面图片等资源由浏览器管理，这里不会清除皮肤偏好。
         </p>
         {notice && <p role="status">{notice}</p>}
         {error && (

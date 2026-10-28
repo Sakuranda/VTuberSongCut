@@ -1,6 +1,7 @@
 import type { ExportSettings, Project } from "./api";
 
 export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
+  mode: "precise",
   video: true,
   audio: true,
   video_codec: "h264",
