@@ -7,6 +7,7 @@ import {
 } from "./api";
 import { usePolling } from "./usePolling";
 import "./recordings.css";
+import { RecorderSettingsPanel } from "./recorder/RecorderSettingsPanel";
 
 const labels = {
   queued: "等待导入",
@@ -206,6 +207,7 @@ export function RecordingsWorkspace({
           )}
         </section>
       )}
+      {admin && <RecorderSettingsPanel active={active && admin} />}
       <section className="panel recording-library">
         <h3>
           已录制素材 <span className="count">{items.length}</span>

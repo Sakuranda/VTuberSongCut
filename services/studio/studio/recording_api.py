@@ -6,7 +6,9 @@ check below. BililiveRecorder v2 sends URL-only webhooks, not HMAC signatures.
 import json
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 from .recorder import RecorderUnavailable, RecorderQueueFull
+from .recorder_settings import RecorderSettingsService
 
 
 class RoomInput(BaseModel):
@@ -22,6 +24,7 @@ class RoomSettings(BaseModel):
 
 def recording_router(service):
     router = APIRouter()
+    settings_service = RecorderSettingsService(service.client)
 
     def call(function, *args):
         try: return function(*args)
@@ -30,6 +33,23 @@ def recording_router(service):
 
     @router.get("/api/recorder/status")
     def status(): return service.status()
+
+    @router.get("/api/recorder/settings")
+    def settings():
+        return settings_service.read()
+
+    @router.put("/api/recorder/settings")
+    async def update_settings(request: Request):
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > 32768:
+                raise HTTPException(413, "录制设置请求过大")
+        try:
+            value = json.loads(body)
+        except (ValueError, UnicodeError) as exc:
+            raise HTTPException(422, "录制设置不是有效JSON") from exc
+        return await run_in_threadpool(call, settings_service.update, value)
 
     @router.get("/api/recorder/rooms")
     def rooms(): return call(service.client.rooms)

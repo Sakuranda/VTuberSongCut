@@ -1,0 +1,116 @@
+.recorder-settings {
+  padding: 22px;
+  margin-bottom: 22px;
+}
+.recorder-settings-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.recorder-settings-heading h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.recorder-settings-heading p,
+.recorder-settings-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 10px 0;
+}
+.recorder-settings-fields {
+  border: 0;
+  padding: 0;
+  margin: 20px 0 0;
+  min-width: 0;
+}
+.recorder-settings-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.recorder-settings-row > .field {
+  flex: 1 1 170px;
+  min-width: 0;
+}
+.recorder-settings-row > .recorder-quality {
+  flex: 2 1 250px;
+}
+.recorder-settings-row > .recorder-split {
+  flex: 0 1 170px;
+}
+.recorder-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 24px;
+  margin: 16px 0 22px;
+}
+.recorder-checkboxes label,
+.recorder-clear-cookie {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.recorder-advanced {
+  border-top: 1px solid var(--line);
+  padding-top: 15px;
+  margin: 0 0 18px;
+}
+.recorder-advanced summary {
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.recorder-timing {
+  max-width: 600px;
+  margin: 18px 0;
+}
+.recorder-cookie-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 18px 0 12px;
+  gap: 12px;
+}
+.recorder-cookie-heading strong {
+  font-size: 13px;
+}
+.recorder-cookie-heading span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.recorder-clear-cookie {
+  margin: 12px 0;
+}
+.recorder-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+.recorder-settings .banner {
+  margin-top: 16px;
+}
+@media (max-width: 720px) {
+  .recorder-settings {
+    padding: 18px;
+  }
+  .recorder-settings-heading {
+    align-items: flex-start;
+  }
+  .recorder-settings-heading > .button {
+    flex-shrink: 0;
+  }
+  .recorder-settings-row > .field,
+  .recorder-settings-row > .recorder-split {
+    flex-basis: 100%;
+  }
+  .recorder-checkboxes {
+    gap: 12px 20px;
+  }
+}
