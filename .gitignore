@@ -23,3 +23,8 @@ apps/desktop/src-tauri/gen/
 /apps/desktop/src-tauri/binaries/
 
 /server-accounts.json
+
+# Shared developer runtime links in isolated worktrees
+.venv
+node_modules
+upstream

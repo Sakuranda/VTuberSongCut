@@ -27,6 +27,8 @@ import type { PreviewQuality } from "./api";
 import { TrainingWorkspace } from "./TrainingWorkspace";
 import { UploadFeedback } from "./UploadFeedback";
 import type { FileUploadState } from "./UploadFeedback";
+import { AuthGate } from "./auth/AuthGate";
+import { unsavedChanges } from "./auth/UnsavedChanges";
 import { OperationProgress } from "./OperationProgress";
 import { usePolling } from "./usePolling";
 import { CacheSettings } from "./CacheSettings";
@@ -119,7 +121,13 @@ function Icon({
     </svg>
   );
 }
-function App() {
+function App({
+  sessionActive = true,
+  onLogout,
+}: {
+  sessionActive?: boolean;
+  onLogout?: () => void;
+}) {
   const { appearance, resolvedMode, updateAppearance, resetAppearance } =
     useAppearance();
   const [appearanceOpen, setAppearanceOpen] = useState(false);
@@ -157,12 +165,15 @@ function App() {
   const previewRequests = useRef(new Set<string>());
   const [mediaEpoch, setMediaEpoch] = useState(0);
   const playbackPosition = useRef({ id: "", time: 0 });
-  const canPrepare = !!caps;
-  const canCreate = !!caps && caps.role !== "viewer";
+  const canPrepare = sessionActive && !!caps;
+  const canCreate = sessionActive && !!caps && caps.role !== "viewer";
   const canManage = !!caps && (!caps.role || caps.role === "admin");
   const canTrain = canManage && caps?.training_enabled !== false;
   const canEdit =
-    !!project && caps?.role !== "viewer" && project.can_edit !== false;
+    sessionActive &&
+    !!project &&
+    caps?.role !== "viewer" &&
+    project.can_edit !== false;
   const [lrc, setLrc] = useState("");
   const [offset, setOffset] = useState(0);
   const [tab, setTab] = useState<"details" | "lyrics" | "export">("details");
@@ -177,6 +188,13 @@ function App() {
   const upload = useRef<HTMLInputElement | null>(null);
   const pendingModelId = useRef<string | null>(null);
   const dirty = !!project && JSON.stringify(projectEdits(project)) !== saved;
+  useEffect(() => {
+    unsavedChanges.set("cut", dirty);
+    return () => unsavedChanges.set("cut", false);
+  }, [dirty]);
+  useEffect(() => {
+    if (!sessionActive) media.current?.pause();
+  }, [sessionActive]);
   const live = useRef({ project, dirty, busy });
   live.current = { project, dirty, busy };
   const previousJobs = useRef<Job[]>([]);
@@ -242,13 +260,13 @@ function App() {
   }
   useEffect(() => {
     const refreshVisibleCatalog = () => {
-      if (!document.hidden) void refreshCatalog();
+      if (sessionActive && !document.hidden) void refreshCatalog();
     };
     refreshVisibleCatalog();
     document.addEventListener("visibilitychange", refreshVisibleCatalog);
     return () =>
       document.removeEventListener("visibilitychange", refreshVisibleCatalog);
-  }, [workspace]);
+  }, [workspace, sessionActive]);
   const fps = editingFps(project?.source_fps);
   const savedOutput = clip?.export_settings || DEFAULT_EXPORT_SETTINGS;
   const output =
@@ -502,7 +520,7 @@ function App() {
         /* Keep editing available during a temporary polling failure. */
       }
     },
-    workspace === "cut" && !!project,
+    sessionActive && workspace === "cut" && !!project,
     processing ? 2000 : 10000,
     project?.id,
   );
@@ -554,6 +572,7 @@ function App() {
     function shortcuts(event: globalThis.KeyboardEvent) {
       const target = event.target instanceof Element ? event.target : null;
       if (
+        !sessionActive ||
         workspace !== "cut" ||
         !project ||
         event.defaultPrevented ||
@@ -601,6 +620,7 @@ function App() {
     return () => window.removeEventListener("keydown", shortcuts);
   }, [
     workspace,
+    sessionActive,
     project,
     clip,
     now,
@@ -790,6 +810,11 @@ function App() {
             </div>
           </div>
           <div className="header-controls">
+            {onLogout && (
+              <button className="button" onClick={onLogout}>
+                退出登录
+              </button>
+            )}
             <div
               className="top-actions"
               hidden={workspace !== "cut" || !project}
@@ -1860,7 +1885,7 @@ function App() {
             </div>
           </div>
           <RecordingsWorkspace
-            active={workspace === "recordings"}
+            active={sessionActive && workspace === "recordings"}
             admin={canManage}
             onOpen={async (id) => {
               if (await load(id, true)) switchWorkspace("cut");
@@ -1868,7 +1893,7 @@ function App() {
           />
           {canTrain ? (
             <TrainingWorkspace
-              active={workspace === "training"}
+              active={sessionActive && workspace === "training"}
               catalog={catalog}
               onModelsChanged={() => void refreshCatalog()}
               onUseModel={(model) => void useModel(model)}
@@ -1925,6 +1950,8 @@ function App() {
 }
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <AuthGate>
+      {(active, logout) => <App sessionActive={active} onLogout={logout} />}
+    </AuthGate>
   </React.StrictMode>,
 );

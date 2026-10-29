@@ -113,6 +113,7 @@ function workspace(api) {
     "./TrainingAnnotation": { TrainingAnnotation: "TrainingAnnotation" },
     "./UploadFeedback": { UploadFeedback: "UploadFeedback" },
     "./usePolling": { usePolling() {} },
+    "./auth/UnsavedChanges": { unsavedChanges: { set() {} } },
   };
   new Function("require", "exports", "window", outputText)(
     (name) => {

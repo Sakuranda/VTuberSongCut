@@ -406,3 +406,20 @@ test("an upload rejects cleanly when the shared session refresh fails instead of
   assert.equal(sessions, 2);
   assert.equal(requests.length, 1);
 });
+
+test('account changes prevent a stale save from replaying under a new cookie',async t=>{
+  const late=deferred();let mutations=0;
+  const {api,resetApiSession}=await fixture(t,async url=>{
+    if(url==='/api/session')return json({token:'old-token'});
+    mutations++;return late.promise;
+  });
+  const pending=api.save(project);await tick();resetApiSession();late.resolve(expired());
+  await assert.rejects(pending,{name:'AbortError'});assert.equal(mutations,1);
+});
+
+test('account changes prevent a stale upload from retrying under a new cookie',async t=>{
+  const {api,requests,resetApiSession}=await fixture(t,async()=>json({token:'old-token'}));
+  const pending=api.upload(new Blob(['test']));await tick();assert.equal(requests.length,1);
+  resetApiSession();requests[0].respond(403,{detail:'会话已失效，请刷新工作台'});
+  await assert.rejects(pending,{name:'AbortError'});assert.equal(requests.length,1);
+});

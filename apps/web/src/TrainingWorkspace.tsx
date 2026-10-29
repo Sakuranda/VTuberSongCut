@@ -10,6 +10,7 @@ import type {
   TrainingSettings,
 } from "./api";
 import { TrainingAnnotation } from "./TrainingAnnotation";
+import { unsavedChanges } from "./auth/UnsavedChanges";
 import { usePolling } from "./usePolling";
 import { UploadFeedback } from "./UploadFeedback";
 import type { FileUploadState } from "./UploadFeedback";
@@ -134,6 +135,10 @@ export function TrainingWorkspace({
     !!sample &&
     JSON.stringify(sample) !==
       JSON.stringify(dataset?.samples.find((item) => item.id === sample.id));
+  useEffect(() => {
+    unsavedChanges.set("training", dirty);
+    return () => unsavedChanges.set("training", false);
+  }, [dirty]);
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty || busy === "导入训练录播";
   const live = useRef({ dataset, busy });

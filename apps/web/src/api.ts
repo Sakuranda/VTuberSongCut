@@ -216,6 +216,8 @@ export class ApiError extends Error {
   constructor(message: string, status: number) {
     super(message);
     this.status = status;
+    if (status === 401 && typeof window !== "undefined")
+      window.dispatchEvent(new Event("songcut-auth-required"));
   }
 }
 const expiredSessionDetail = "会话已失效，请刷新工作台";
@@ -223,6 +225,18 @@ interface Session {
   token: Promise<string>;
 }
 let session: Session | undefined;
+let sessionGeneration = 0;
+export function resetApiSession() {
+  session = undefined;
+  sessionGeneration++;
+}
+function assertSessionGeneration(expected: number) {
+  if (expected !== sessionGeneration)
+    throw new DOMException(
+      "登录状态已变化，请重新读取项目确认结果。",
+      "AbortError",
+    );
+}
 
 function errorMessage(status: number, body: unknown, fallback: string) {
   if (body !== null && typeof body === "object") {
@@ -245,10 +259,12 @@ function getSession(stale?: Session): Session {
   // an old token must join the same refresh, including late arriving responses.
   if (stale && session === stale) session = undefined;
   if (!session) {
+    const generation = sessionGeneration;
     const next: Session = {
       token: fetch("/api/session", { cache: "no-store" })
         .then(async (response) => {
           const body: unknown = await response.json().catch(() => undefined);
+          assertSessionGeneration(generation);
           if (!response.ok)
             throw new ApiError(
               errorMessage(
@@ -302,7 +318,11 @@ function withAbort<T>(
     if (signal.aborted) abort();
   });
 }
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const generation = sessionGeneration;
   const protectedRequest = !["GET", "HEAD", "OPTIONS"].includes(
     (init.method ?? "GET").toUpperCase(),
   );
@@ -316,7 +336,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
         await withAbort(currentSession.token, init.signal),
       );
     init.signal?.throwIfAborted();
+    assertSessionGeneration(generation);
     const response = await fetch(`/api${path}`, { ...init, headers });
+    assertSessionGeneration(generation);
     let body: unknown;
     try {
       body = await response.json();
@@ -329,6 +351,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
         );
     }
     init.signal?.throwIfAborted();
+    assertSessionGeneration(generation);
     // The middleware rejects this exact error before invoking any mutation.
     // Never replay ordinary 403s, network errors, or ambiguous server responses.
     if (
@@ -442,11 +465,13 @@ export async function uploadForm<T>(
   onProgress?: (progress: UploadProgress) => void,
   signal?: AbortSignal,
 ): Promise<T> {
+  const generation = sessionGeneration;
   signal?.throwIfAborted();
   let currentSession = getSession();
   for (let attempt = 0; ; attempt++) {
     const sessionToken = await withAbort(currentSession.token, signal);
     signal?.throwIfAborted();
+    assertSessionGeneration(generation);
     const response = await sendUpload(
       path,
       body,
@@ -455,6 +480,7 @@ export async function uploadForm<T>(
       signal,
     );
     signal?.throwIfAborted();
+    assertSessionGeneration(generation);
     if (attempt === 0 && expiredSession(response.status, response.body)) {
       currentSession = getSession(currentSession);
       onProgress?.({ phase: "uploading", loaded: 0, total: null });
