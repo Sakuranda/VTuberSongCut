@@ -34,13 +34,14 @@ def server(tmp_path, monkeypatch):
     users.write_text(json.dumps({name: {'password': PASSWORD, 'role': role} for name, role in
                                 [('alice', 'editor'), ('bob', 'editor'), ('visitor', 'viewer')]}))
     for key, value in {'SONGCUT_SERVER': '1', 'SONGCUT_SERVER_USERNAME': 'admin',
-                       'SONGCUT_SERVER_PASSWORD': PASSWORD, 'SONGCUT_PUBLIC_ORIGIN': 'http://testserver',
+                       'SONGCUT_SERVER_PASSWORD': PASSWORD, 'SONGCUT_PUBLIC_ORIGIN': 'https://testserver',
+                       'SONGCUT_AUTH_MODE': 'basic',
                        'SONGCUT_USERS_FILE': str(users), 'SONGCUT_LOW_RESOURCE': '1',
                        'SONGCUT_DISK_RESERVE_MB': '0'}.items():
         monkeypatch.setenv(key, value)
     config = Settings(root=tmp_path, data=tmp_path / 'data', upstream=tmp_path / 'upstream', checkpoint=tmp_path / 'none')
     app = create_app(config)
-    with TestClient(app) as client:
+    with TestClient(app, base_url='https://testserver') as client:
         source = config.data / 'original.mp4'
         source.write_bytes(b'original-source-not-proxy')
         shared = Project(name='shared', source_name=source.name, source_file=str(source), duration_ms=60000,
@@ -177,8 +178,10 @@ def test_shared_preview_reuse_keeps_requesters_project_context(server):
         assert reused['project_id'] == alice.id
         assert 'task' not in reused
         visible = client.get(f'/api/jobs?project_id={alice.id}', headers=credentials('alice')).json()
-        assert len(visible) == 1 and visible[0]['id'] == reused['id']
-        assert visible[0]['project_id'] == alice.id and 'task' not in visible[0]
+        # Background maintenance may also enqueue legitimate preview profiles.
+        matching = [job for job in visible if job['id'] == reused['id']]
+        assert len(matching) == 1
+        assert all(job['project_id'] == alice.id and 'task' not in job for job in visible)
     finally:
         release.set()
 

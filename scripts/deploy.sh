@@ -57,6 +57,7 @@ append_default() {
         printf '\n%s=%s\n' "$1" "$2" >> .env.server
     fi
 }
+append_default SONGCUT_AUTH_MODE totp
 if grep -q '^SONGCUT_RECORDER_ENABLED=1$' .env.server; then
     recorder_password=$(LC_ALL=C od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
     webhook_secret=$(LC_ALL=C od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
@@ -79,6 +80,10 @@ if [ -f server-accounts.json ]; then
     set -- "$@" -f deploy/compose.accounts.yaml
 fi
 "$@" up -d --build --wait --wait-timeout 180
+if grep -q '^SONGCUT_AUTH_MODE=totp$' .env.server; then
+    "$@" exec -T songcut python -m studio.authentication enroll --default-admin --if-missing --output /data/admin-authenticator.json
+    printf '动态验证码已启用。首次请通过服务器终端读取 /data/admin-authenticator.json，导入身份验证器后登录；勿公开该文件。\n'
+fi
 if grep -q '^SONGCUT_RECORDER_ENABLED=1$' .env.server; then
     "$@" exec -T songcut python -m studio.recorder --configure-webhook
     printf '录播姬已连接，回调已配置；打开拾歌的录播库添加房间即可。\n'

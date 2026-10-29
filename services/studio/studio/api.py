@@ -16,6 +16,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Form
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.concurrency import run_in_threadpool
 from .config import Settings
 from .server_config import ServerConfig
 from .domain import Record, Project, Clip, Job
@@ -28,6 +29,8 @@ from .model_library import ModelLibrary, ModelInfo, MAX_MODEL_BYTES, checksum
 from .training import TrainingService, normalize_settings
 from .cache import RuntimeCache
 from .access import Access
+from .authentication import AuthService
+from .auth_api import auth_router
 from .request_limits import RequestLimits
 from .workspace_lease import WorkspaceLease
 from .media_maintenance import PreviewMaintenance
@@ -100,6 +103,7 @@ def create_app(settings: Settings | None = None):
 
 def _create_app(server, config, policy, access, recorder_config, lease, cleanup):
     store = Store(config.data / "studio.sqlite3")
+    auth = AuthService(server, access, store)
     os.environ.setdefault("SONGCUT_CPU_THREADS", str(policy.threads))
     runner = JobRunner(store, policy)
     cleanup.append(lambda: runner.close(preserve_pending=True))
@@ -200,6 +204,7 @@ def _create_app(server, config, policy, access, recorder_config, lease, cleanup)
     app.state.recorder = recorder
     app.state.policy = policy
     app.state.lease = lease
+    app.state.auth = auth
     hosts = server.allowed_hosts
     if recorder_config.enabled:
         hosts.append(os.environ.get("SONGCUT_RECORDER_WEBHOOK_HOST", "songcut"))
@@ -216,21 +221,29 @@ def _create_app(server, config, policy, access, recorder_config, lease, cleanup)
         origin = request.headers.get("origin")
         if origin and origin not in server.allowed_origins:
             return JSONResponse({"detail": "请求来源不在工作台允许列表中"}, status_code=403)
-        user = access.identify(request.headers.get("authorization", ""))
-        if user is None and path != "/api/health":
-            return JSONResponse({"detail": "请使用服务器账户登录"}, status_code=401,
-                                headers={"WWW-Authenticate": 'Basic realm="SongCut", charset="UTF-8"', "Cache-Control": "no-store"})
+        user = await run_in_threadpool(auth.identify, request)
+        auth_entry = path in {"/api/auth/status", "/api/auth/login", "/api/auth/logout"}
+        login_shell = server.enabled and server.auth_mode == "totp" and (path in {"/", "/index.html", "/favicon.ico"} or path.startswith("/assets/"))
+        if user is None and path != "/api/health" and not auth_entry and not login_shell:
+            headers = {"Cache-Control": "no-store"}
+            if server.auth_mode == "basic":
+                headers["WWW-Authenticate"] = 'Basic realm="SongCut", charset="UTF-8"'
+            return JSONResponse({"detail": "请登录工作台"}, status_code=401, headers=headers)
         request.state.identity = user
         mutating = path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}
-        expected_token = hmac.new(token.encode(), (user.name if user else "").encode(), hashlib.sha256).hexdigest()
-        if mutating and not hmac.compare_digest(request.headers.get("x-studio-token", ""), expected_token):
-            return JSONResponse({"detail": "会话已失效，请刷新工作台"}, status_code=403)
+        if mutating and not auth_entry:
+            expected_token = (await run_in_threadpool(auth.csrf, request)) if server.enabled and server.auth_mode == "totp" else hmac.new(token.encode(), user.name.encode(), hashlib.sha256).hexdigest()
+            if not expected_token:
+                return JSONResponse({"detail": "请重新登录工作台"}, status_code=401, headers={"Cache-Control": "no-store"})
+            supplied_token = request.headers.get("x-studio-token", "")
+            if not supplied_token.isascii() or not hmac.compare_digest(supplied_token, expected_token):
+                return JSONResponse({"detail": "会话已失效，请刷新工作台"}, status_code=403)
         admin_path = (path.startswith("/api/training/") or path.startswith("/api/recorder/")
                       or path.startswith("/api/cache") or path == "/api/models/upload"
                       or (path.startswith("/api/models/") and path.endswith("/download"))
                       or (path.startswith("/api/recordings/") and mutating))
         viewer_media_action = bool(re.fullmatch(r"/api/projects/[^/]+/preview|/api/jobs/[^/]+/cancel", path))
-        if user and ((admin_path and not user.admin) or (mutating and user.role == "viewer" and not viewer_media_action)):
+        if user and not auth_entry and ((admin_path and not user.admin) or (mutating and user.role == "viewer" and not viewer_media_action)):
             return JSONResponse({"detail": "当前账户没有此操作权限"}, status_code=403)
         if mutating and (path.endswith("/upload") or path.endswith("/samples")):
             try:
@@ -246,7 +259,7 @@ def _create_app(server, config, policy, access, recorder_config, lease, cleanup)
         if request.url.path.startswith("/api/"):
             if path.endswith("/media") or path.startswith("/api/artifacts/"):
                 response.headers["Cache-Control"] = "private, max-age=60, must-revalidate" if response.status_code < 400 else "no-store"
-                response.headers["Vary"] = "Authorization"
+                response.headers["Vary"] = "Cookie" if server.auth_mode == "totp" and server.enabled else "Authorization"
             else:
                 response.headers["Cache-Control"] = "no-store"
         elif request.url.path in {"/", "/index.html"}:
@@ -275,7 +288,9 @@ def _create_app(server, config, policy, access, recorder_config, lease, cleanup)
 
     @app.get("/api/session")
     def session(request: Request):
-        value = hmac.new(token.encode(), request.state.identity.name.encode(), hashlib.sha256).hexdigest()
+        value = auth.csrf(request) if server.enabled and server.auth_mode == "totp" else hmac.new(token.encode(), request.state.identity.name.encode(), hashlib.sha256).hexdigest()
+        if not value:
+            raise HTTPException(401, "请重新登录工作台")
         return JSONResponse({"token": value}, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/capabilities")
@@ -627,6 +642,7 @@ def _create_app(server, config, policy, access, recorder_config, lease, cleanup)
     def model_help():
         return render_help_document("MODELS.md")
 
+    app.include_router(auth_router(auth))
     app.include_router(recording_router(recorder))
 
     web = config.root / "apps/web/dist"
@@ -639,7 +655,7 @@ def main():
     import uvicorn
     server = ServerConfig.load()
     uvicorn.run(create_app(), host=server.host, port=server.port, access_log=False,
-                proxy_headers=server.enabled, forwarded_allow_ips="127.0.0.1")
+                proxy_headers=server.enabled, forwarded_allow_ips=server.trusted_proxy_ips)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ PASSWORD = "test-only-password-32-characters"
 @pytest.fixture
 def server(tmp_path, monkeypatch):
     monkeypatch.setenv("SONGCUT_SERVER", "1")
+    monkeypatch.setenv("SONGCUT_AUTH_MODE", "basic")
     monkeypatch.setenv("SONGCUT_SERVER_USERNAME", "admin")
     monkeypatch.setenv("SONGCUT_SERVER_PASSWORD", PASSWORD)
     monkeypatch.setenv("SONGCUT_PUBLIC_ORIGIN", "https://songs.example.com")
@@ -91,6 +92,7 @@ def test_native_media_range_and_download_are_authenticated_without_csrf_header(s
 ])
 def test_server_refuses_incomplete_or_unsafe_configuration(monkeypatch, updates):
     monkeypatch.setenv("SONGCUT_SERVER", "1")
+    monkeypatch.setenv("SONGCUT_AUTH_MODE", "basic")
     monkeypatch.setenv("SONGCUT_SERVER_USERNAME", "admin")
     monkeypatch.setenv("SONGCUT_SERVER_PASSWORD", PASSWORD)
     for key, value in updates.items():

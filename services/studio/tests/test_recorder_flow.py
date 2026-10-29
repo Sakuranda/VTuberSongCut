@@ -30,7 +30,7 @@ def test_closed_recording_import_preview_and_editor_clone(tmp_path, monkeypatch)
     users = tmp_path / 'users.json'
     users.write_text(json.dumps({'editor': {'password': password, 'role': 'editor'},
                                  'viewer': {'password': password, 'role': 'viewer'}}))
-    for key, value in {'SONGCUT_SERVER': '1', 'SONGCUT_SERVER_USERNAME': 'admin',
+    for key, value in {'SONGCUT_SERVER': '1', 'SONGCUT_AUTH_MODE': 'basic', 'SONGCUT_SERVER_USERNAME': 'admin',
                        'SONGCUT_SERVER_PASSWORD': password, 'SONGCUT_PUBLIC_ORIGIN': 'https://songs.example.com',
                        'SONGCUT_USERS_FILE': str(users), 'SONGCUT_RECORDER_URL': 'http://127.0.0.1:9',
                        'SONGCUT_RECORDER_USERNAME': 'recorder', 'SONGCUT_RECORDER_PASSWORD': password,

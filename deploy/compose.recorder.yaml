@@ -23,6 +23,9 @@ services:
       UMASK: "022"
     volumes:
       - recorder-data:/rec
+    networks:
+      default:
+        ipv4_address: ${SONGCUT_RECORDER_IP:-172.29.77.4}
     expose:
       - "2356"
     cpus: ${SONGCUT_RECORDER_CPUS:-0.5}

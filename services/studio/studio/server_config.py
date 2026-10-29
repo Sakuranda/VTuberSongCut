@@ -1,10 +1,7 @@
 """Explicit server opt-in; desktop remains bound to loopback without a password."""
 from dataclasses import dataclass
-import base64
-import binascii
-import hashlib
-import hmac
 import os
+import ipaddress
 from urllib.parse import urlsplit
 
 
@@ -16,6 +13,7 @@ class ServerConfig:
     origin: str = ""
     host: str = "127.0.0.1"
     port: int = 8765
+    auth_mode: str = "totp"
 
     @classmethod
     def load(cls):
@@ -30,7 +28,7 @@ class ServerConfig:
             return cls(host=host, port=port)
         username = os.environ.get("SONGCUT_SERVER_USERNAME", "")
         password = os.environ.get("SONGCUT_SERVER_PASSWORD", "")
-        if not username or ":" in username or not password or len(password) < 16:
+        if not username or len(username) > 200 or ":" in username or not password or not 16 <= len(password) <= 1024:
             raise ValueError("Server mode requires SONGCUT_SERVER_USERNAME and a password of at least 16 characters")
         origin = os.environ.get("SONGCUT_PUBLIC_ORIGIN", "http://localhost:8765")
         parsed = urlsplit(origin)
@@ -40,7 +38,21 @@ class ServerConfig:
             raise ValueError("SONGCUT_PUBLIC_ORIGIN must be one exact http(s) origin")
         # Reject invalid/out-of-range ports at startup, before accepting traffic.
         parsed.port
-        return cls(True, username, password, origin.rstrip("/"), host, port)
+        mode = os.environ.get("SONGCUT_AUTH_MODE", "totp")
+        if mode not in {"totp", "basic"}:
+            raise ValueError("SONGCUT_AUTH_MODE must be totp or basic")
+        if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("Public server origin requires HTTPS")
+        value = cls(True, username, password, origin.rstrip("/"), host, port, mode)
+        value.trusted_proxy_ips
+        return value
+
+    @property
+    def trusted_proxy_ips(self):
+        values = os.environ.get("SONGCUT_TRUSTED_PROXY_IPS", "127.0.0.1").split(",")
+        if not 1 <= len(values) <= 8:
+            raise ValueError("Configure only explicit trusted proxy IP addresses")
+        return ",".join(str(ipaddress.ip_address(value.strip())) for value in values)
 
     @property
     def allowed_hosts(self):
@@ -56,17 +68,8 @@ class ServerConfig:
                 "http://127.0.0.1:5173", "http://localhost:5173"}
 
     def authenticate(self, authorization: str):
-        """Compare fixed-length digests; never include supplied credentials in errors."""
-        try:
-            scheme, encoded = authorization.split(" ", 1)
-            if scheme.lower() != "basic" or len(encoded) > 8192:
-                return False
-            supplied = base64.b64decode(encoded, validate=True).decode("utf-8")
-            username, password = supplied.split(":", 1)
-        except (ValueError, UnicodeError, binascii.Error):
+        """Compatibility helper; TOTP mode never accepts Basic credentials."""
+        if not self.enabled or self.auth_mode != "basic":
             return False
-        user_matches = hmac.compare_digest(hashlib.sha256(username.encode()).digest(),
-                                           hashlib.sha256(self.username.encode()).digest())
-        password_matches = hmac.compare_digest(hashlib.sha256(password.encode()).digest(),
-                                               hashlib.sha256(self.password.encode()).digest())
-        return user_matches & password_matches
+        from .access import Access
+        return Access(self).identify(authorization) is not None

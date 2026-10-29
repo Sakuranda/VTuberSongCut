@@ -13,6 +13,9 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+    networks:
+      default:
+        ipv4_address: ${SONGCUT_PROXY_IP:-172.29.77.2}
     depends_on:
       songcut:
         condition: service_healthy

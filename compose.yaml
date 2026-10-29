@@ -8,6 +8,8 @@ services:
     restart: unless-stopped
     environment:
       SONGCUT_SERVER: "1"
+      SONGCUT_AUTH_MODE: ${SONGCUT_AUTH_MODE:-totp}
+      SONGCUT_TRUSTED_PROXY_IPS: ${SONGCUT_PROXY_IP:-172.29.77.2}
       SONGCUT_HOST: "0.0.0.0"
       SONGCUT_DATA: /data
       SONGCUT_DEVICE: cpu
@@ -26,6 +28,9 @@ services:
       SONGCUT_PUBLIC_ORIGIN: ${SONGCUT_PUBLIC_ORIGIN:-http://localhost:8765}
       SONGCUT_SERVER_USERNAME: ${SONGCUT_SERVER_USERNAME:?Run scripts/deploy.sh to generate server credentials}
       SONGCUT_SERVER_PASSWORD: ${SONGCUT_SERVER_PASSWORD:?Run scripts/deploy.sh to generate server credentials}
+    networks:
+      default:
+        ipv4_address: ${SONGCUT_APP_IP:-172.29.77.3}
     ports:
       - "${SONGCUT_BIND:-127.0.0.1}:${SONGCUT_HTTP_PORT:-8765}:8765"
     volumes:
@@ -40,3 +45,10 @@ services:
       - ALL
 volumes:
   songcut-data:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${SONGCUT_NETWORK_SUBNET:-172.29.77.0/28}
+          ip_range: ${SONGCUT_NETWORK_DYNAMIC_RANGE:-172.29.77.8/29}
