@@ -1,0 +1,3175 @@
+{
+  "snapshot": "333104dab5cc25c6c59a6ae2f79a49f11a6160f1",
+  "audit_date": "2026-10-29",
+  "stack": {
+    "framework": "React",
+    "react": "19.1.0",
+    "typescript": "5.8.3",
+    "vite": "6.3.5",
+    "vue_present": false
+  },
+  "nodes": [
+    {
+      "id": "fe-app",
+      "title": "应用入口与工作区装配",
+      "kind": "ui",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "App",
+          "line": 122
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "createRoot",
+          "line": 1926
+        }
+      ],
+      "responsibility": "React入口，装配切歌、训练/模型管理、录播库以及全局外观/缓存对话框。",
+      "features": [
+        "默认切歌工作区",
+        "按能力切换训练或模型管理",
+        "视图权限提示与只读交互",
+        "组合全站UI组件"
+      ],
+      "dependencies": [
+        "fe-project-flow",
+        "fe-timeline",
+        "fe-timecode",
+        "fe-export-controls",
+        "fe-training",
+        "fe-models",
+        "fe-recordings",
+        "fe-upload-feedback",
+        "fe-appearance",
+        "fe-cache",
+        "fe-welcome",
+        "fe-theme",
+        "fe-lyrics"
+      ],
+      "separation": "mixed",
+      "notes": [
+        "App仍同时承担大量流程编排，当前不是一个仅渲染的薄UI。",
+        "前端实际为React19.1+TypeScript5.8/Vite6.3；没有Vue运行依赖。"
+      ]
+    },
+    {
+      "id": "fe-project-flow",
+      "title": "项目、草稿与播放编排（内嵌App）",
+      "kind": "logic",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "accept",
+          "line": 279
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "load",
+          "line": 292
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "requestPreview",
+          "line": 332
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "save",
+          "line": 613
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "importVideo",
+          "line": 640
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "run",
+          "line": 693
+        }
+      ],
+      "responsibility": "持有编辑草稿、已保存快照、选择、媒体位置、任务和权限状态，协调API与UI。",
+      "features": [
+        "导入、读取、克隆与保存项目",
+        "409冲突提示且保留草稿",
+        "延迟响应隔离",
+        "默认低清与按需高清",
+        "任务完成后刷新数据而不覆盖脏草稿",
+        "提交检测、预览、导出与取消",
+        "LRC导入和歌词样式草稿"
+      ],
+      "dependencies": [
+        "fe-api",
+        "fe-types",
+        "fe-editing",
+        "fe-playback",
+        "fe-polling"
+      ],
+      "separation": "mixed",
+      "notes": [
+        "这是main.tsx中的逻辑区域，不是已经拆出的独立模块。",
+        "页面内的canEdit/canManage是交互限制，真正授权仍由Python服务端执行。",
+        "src/frame-rate时间轴规则、DOM事件、异步流程与JSX仍在同一组件中。"
+      ]
+    },
+    {
+      "id": "fe-types",
+      "title": "共享前端类型（目前混在api.ts）",
+      "kind": "logic",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "Project",
+          "line": 112
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "Job",
+          "line": 137
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "TrainingDataset",
+          "line": 74
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "RecorderStatus",
+          "line": 169
+        }
+      ],
+      "responsibility": "定义项目、片段、训练、模型、录播、能力与缓存的TypeScript传输类型。",
+      "features": [
+        "编辑模型字段",
+        "任务与训练状态",
+        "角色/低配能力字段",
+        "低清/高清状态",
+        "录播房间及归档记录"
+      ],
+      "dependencies": [],
+      "separation": "types",
+      "notes": [
+        "22个interface声明，其中包括网络内部类型；多处业务函数以import type依赖api.ts。",
+        "TS类型本身不会验证运行时JSON；服务端Pydantic约束与请求响应形状是另一个边界。"
+      ]
+    },
+    {
+      "id": "fe-api",
+      "title": "HTTP、会话与上传客户端",
+      "kind": "transport",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "ApiError",
+          "line": 214
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "getSession",
+          "line": 243
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "request",
+          "line": 305
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "sendUpload",
+          "line": 360
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "uploadForm",
+          "line": 439
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "api",
+          "line": 500
+        }
+      ],
+      "responsibility": "集中封装HTTP调用、会话token更新、XHR上传进度和36个业务接口/URL方法。",
+      "features": [
+        "精确会话失效403才重试一次",
+        "并发会话刷新合并",
+        "AbortSignal中止",
+        "上传字节进度与服务端处理阶段",
+        "普通403/网络不确定错误不盲目重放",
+        "构造媒体/产物下载地址"
+      ],
+      "dependencies": [
+        "fe-types"
+      ],
+      "separation": "mixed",
+      "notes": [
+        "目前是模块级单例session和api对象，唯一显式前端类是ApiError。",
+        "同一个文件混合类型、传输、鉴权生命周期、上传器与业务端点。"
+      ]
+    },
+    {
+      "id": "fe-editing",
+      "title": "时间码与项目校验",
+      "kind": "logic",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/editing.ts",
+          "symbol": "normalizeProject",
+          "line": 15
+        },
+        {
+          "path": "apps/web/src/editing.ts",
+          "symbol": "formatTimecode",
+          "line": 27
+        },
+        {
+          "path": "apps/web/src/editing.ts",
+          "symbol": "parseTimecode",
+          "line": 31
+        },
+        {
+          "path": "apps/web/src/editing.ts",
+          "symbol": "snapToFrame / stepFrames",
+          "line": 46
+        },
+        {
+          "path": "apps/web/src/editing.ts",
+          "symbol": "validateProject",
+          "line": 57
+        }
+      ],
+      "responsibility": "可复用纯计算规则：缺省配置、时间码、帧网格和客户端表单校验。",
+      "features": [
+        "旧项目补齐默认字段",
+        "毫秒和HH:MM:SS.mmm转换",
+        "29.97等帧率步进避免累积舍入",
+        "检查边界/字幕/输出参数"
+      ],
+      "dependencies": [
+        "fe-types"
+      ],
+      "separation": "pure",
+      "notes": [
+        "适合继续保持纯函数，不必为了多用类把无状态计算包装为实例。",
+        "部分低配/快速导出规则仍在App或ExportControls中，服务端还有权威校验。"
+      ]
+    },
+    {
+      "id": "fe-playback",
+      "title": "预览状态与元数据合并",
+      "kind": "logic",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/playback.ts",
+          "symbol": "previewReady",
+          "line": 3
+        },
+        {
+          "path": "apps/web/src/playback.ts",
+          "symbol": "mergePreviewMetadata",
+          "line": 14
+        }
+      ],
+      "responsibility": "识别low320-v1是否真正就绪，合并预览元数据而不覆盖草稿。",
+      "features": [
+        "旧高码率兼容文件不冒充320p",
+        "音频无需视频代理即可播放",
+        "高低清独立就绪条件",
+        "后台预览更新保留编辑、版本和权限"
+      ],
+      "dependencies": [
+        "fe-types"
+      ],
+      "separation": "pure",
+      "notes": []
+    },
+    {
+      "id": "fe-polling",
+      "title": "可见性轮询与React桥接",
+      "kind": "logic",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/polling.ts",
+          "symbol": "startVisiblePolling",
+          "line": 2
+        },
+        {
+          "path": "apps/web/src/usePolling.ts",
+          "symbol": "usePolling",
+          "line": 4
+        }
+      ],
+      "responsibility": "单请求串行轮询，引入页面可见性与取消机制；React hook只连接生命周期。",
+      "features": [
+        "隐藏标签暂停并中止读取",
+        "返回前台立即检查",
+        "慢请求不重叠",
+        "停止任务后清理计时器",
+        "多个工作区复用同一策略"
+      ],
+      "dependencies": [],
+      "separation": "adapter",
+      "notes": [
+        "polling.ts已与React hook拆开，是可复用的现有分层样例。",
+        "底层默认使用document，但允许注入visibility/schedule/cancel。"
+      ]
+    },
+    {
+      "id": "fe-timeline",
+      "title": "切歌时间轴与边界手柄",
+      "kind": "ui",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/Timeline.tsx",
+          "symbol": "Timeline",
+          "line": 16
+        },
+        {
+          "path": "apps/web/src/Timeline.tsx",
+          "symbol": "pointerTime",
+          "line": 28
+        },
+        {
+          "path": "apps/web/src/Timeline.tsx",
+          "symbol": "changeBoundary",
+          "line": 38
+        },
+        {
+          "path": "apps/web/src/Timeline.tsx",
+          "symbol": "handleKey",
+          "line": 49
+        }
+      ],
+      "responsibility": "将指针位置和键盘动作转换为时间，再通过回调通知项目编排层。",
+      "features": [
+        "点击定位",
+        "拖动入点/出点",
+        "方向键逐帧及Shift十帧",
+        "最小边界间隔",
+        "可访问的滑块与控件"
+      ],
+      "dependencies": [
+        "fe-editing",
+        "fe-types"
+      ],
+      "separation": "mostly-view",
+      "notes": [
+        "无HTTP调用；几何映射属于UI适配，但边界规则与App.boundary存在重复。"
+      ]
+    },
+    {
+      "id": "fe-timecode",
+      "title": "可复用时间码输入",
+      "kind": "ui",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/TimecodeInput.tsx",
+          "symbol": "TimecodeInput",
+          "line": 13
+        },
+        {
+          "path": "apps/web/src/TimecodeInput.tsx",
+          "symbol": "edit",
+          "line": 34
+        }
+      ],
+      "responsibility": "封装输入文本、焦点、范围错误与值变更通知。",
+      "features": [
+        "切歌与训练共用",
+        "格式与有效范围提示",
+        "Enter确认、Escape还原",
+        "输入期间避免外部状态干扰"
+      ],
+      "dependencies": [
+        "fe-editing"
+      ],
+      "separation": "mostly-view",
+      "notes": []
+    },
+    {
+      "id": "fe-export-controls",
+      "title": "导出参数表单",
+      "kind": "ui",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/ExportControls.tsx",
+          "symbol": "ExportControls",
+          "line": 13
+        }
+      ],
+      "responsibility": "由父级传入当前ExportSettings和onChange，只渲染输出选项及即时规则。",
+      "features": [
+        "MP4/MP3选择",
+        "精确/快速模式",
+        "编码、分辨率、帧率、画质/码率",
+        "低配规格禁用提示",
+        "快速导出时保留原规格"
+      ],
+      "dependencies": [
+        "fe-types"
+      ],
+      "separation": "mostly-view",
+      "notes": [
+        "无本地useState或HTTP调用；是薄表单，但模式切换约束也可移入TS导出策略纯函数。"
+      ]
+    },
+    {
+      "id": "fe-training",
+      "title": "训练工作区与准备度校验",
+      "kind": "ui",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/TrainingWorkspace.tsx",
+          "symbol": "trainingReadiness",
+          "line": 44
+        },
+        {
+          "path": "apps/web/src/TrainingWorkspace.tsx",
+          "symbol": "TrainingWorkspace",
+          "line": 88
+        },
+        {
+          "path": "apps/web/src/TrainingWorkspace.tsx",
+          "symbol": "importSample",
+          "line": 280
+        }
+      ],
+      "responsibility": "管理数据集、选中素材、未保存标注、训练参数、训练任务与模型刷新。",
+      "features": [
+        "创建训练项目",
+        "上传样本与实际进度",
+        "训练/验证集独立性预检查",
+        "保存/删除标注素材",
+        "启动和取消训练",
+        "训练完成刷新模型库"
+      ],
+      "dependencies": [
+        "fe-api",
+        "fe-types",
+        "fe-annotation",
+        "fe-polling",
+        "fe-upload-feedback"
+      ],
+      "separation": "mixed",
+      "notes": [
+        "训练准备度与参数范围规则仍在TSX中。",
+        "重型训练在Python后台；该页面只提交配置与展示进度。",
+        "服务端低配模式禁用训练时App改为模型管理界面。"
+      ]
+    },
+    {
+      "id": "fe-annotation",
+      "title": "训练视频标注器",
+      "kind": "ui",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/TrainingAnnotation.tsx",
+          "symbol": "TrainingAnnotation",
+          "line": 14
+        },
+        {
+          "path": "apps/web/src/TrainingAnnotation.tsx",
+          "symbol": "generatePreview",
+          "line": 87
+        },
+        {
+          "path": "apps/web/src/TrainingAnnotation.tsx",
+          "symbol": "addRegion",
+          "line": 112
+        },
+        {
+          "path": "apps/web/src/TrainingAnnotation.tsx",
+          "symbol": "shortcuts",
+          "line": 147
+        }
+      ],
+      "responsibility": "将视频预览、目标/其他演唱区间标注与兼容预览任务整合为训练子视图。",
+      "features": [
+        "拖动区间与时间戳编辑",
+        "Space/K播放、I/O标记、A添加",
+        "禁止重叠标注",
+        "改动后取消完整复核状态",
+        "恢复预览任务并显示实际进度"
+      ],
+      "dependencies": [
+        "fe-api",
+        "fe-types",
+        "fe-editing",
+        "fe-timecode",
+        "fe-polling",
+        "fe-upload-feedback"
+      ],
+      "separation": "mixed",
+      "notes": [
+        "使用的是训练兼容预览接口，不能与切歌320p/高清代理流程混为一谈。",
+        "视频DOM、快捷键适配、标注领域规则和任务流程仍混在一起。"
+      ]
+    },
+    {
+      "id": "fe-models",
+      "title": "模型选择与导入",
+      "kind": "ui",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/ModelControls.tsx",
+          "symbol": "ModelSelector",
+          "line": 6
+        },
+        {
+          "path": "apps/web/src/ModelControls.tsx",
+          "symbol": "ModelManager",
+          "line": 201
+        },
+        {
+          "path": "apps/web/src/ModelControls.tsx",
+          "symbol": "importModel",
+          "line": 216
+        }
+      ],
+      "responsibility": "选择主播模型与运行设备，展示模型库及帮助，并上传兼容模型。",
+      "features": [
+        "模型与设备显式选择",
+        "帮助跳转训练/模型管理",
+        "文件名和自定义名称",
+        "导入后刷新模型库",
+        "模型下载/使用入口"
+      ],
+      "dependencies": [
+        "fe-api",
+        "fe-types"
+      ],
+      "separation": "mixed",
+      "notes": [
+        "ModelSelector主要是props回调；ModelManager直接调用api.uploadModel并管理异步状态。"
+      ]
+    },
+    {
+      "id": "fe-recordings",
+      "title": "录播库与录制控制",
+      "kind": "ui",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/RecordingsWorkspace.tsx",
+          "symbol": "RecordingsWorkspace",
+          "line": 18
+        },
+        {
+          "path": "apps/web/src/RecordingsWorkspace.tsx",
+          "symbol": "act",
+          "line": 66
+        }
+      ],
+      "responsibility": "展示归档录播；管理员读取录制器状态并控制房间。",
+      "features": [
+        "录播文件状态及打开/重试",
+        "管理员添加房间与自动录制开关",
+        "开始/停止录制",
+        "磁盘暂停告警",
+        "可见工作区10秒轮询"
+      ],
+      "dependencies": [
+        "fe-api",
+        "fe-types",
+        "fe-polling"
+      ],
+      "separation": "mixed",
+      "notes": [
+        "REST流程和loading/error状态在TSX中；不承载真实直播抓流或编码。",
+        "非管理员只取归档列表；打开项目通过App.onOpen回调。"
+      ]
+    },
+    {
+      "id": "fe-upload-feedback",
+      "title": "上传与任务进度视图",
+      "kind": "ui",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/UploadFeedback.tsx",
+          "symbol": "FileUploadState",
+          "line": 4
+        },
+        {
+          "path": "apps/web/src/UploadFeedback.tsx",
+          "symbol": "UploadFeedback",
+          "line": 19
+        },
+        {
+          "path": "apps/web/src/OperationProgress.tsx",
+          "symbol": "OperationProgress",
+          "line": 1
+        }
+      ],
+      "responsibility": "统一呈现字节上传、服务端处理、成功、失败和重试。",
+      "features": [
+        "切歌/训练复用进度UI",
+        "区分传输完成与处理完成",
+        "无总长度时不假造百分比",
+        "错误提示与重选/重试动作"
+      ],
+      "dependencies": [
+        "fe-types"
+      ],
+      "separation": "mostly-view",
+      "notes": [
+        "FileUploadState目前定义在UI文件中，被App/训练流程反向导入；建议移到应用层类型。"
+      ]
+    },
+    {
+      "id": "fe-theme",
+      "title": "外观状态与浏览器适配",
+      "kind": "logic",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/theme.ts",
+          "symbol": "parseAppearance",
+          "line": 22
+        },
+        {
+          "path": "apps/web/src/theme.ts",
+          "symbol": "createAppearanceController",
+          "line": 55
+        },
+        {
+          "path": "apps/web/src/theme.ts",
+          "symbol": "useAppearance",
+          "line": 135
+        }
+      ],
+      "responsibility": "校验并持久化皮肤/配色/明暗，监听系统模式与跨标签更新，向UI提供快照。",
+      "features": [
+        "本地存储偏好",
+        "四套配色与系统明暗",
+        "无效/受限存储安全回退",
+        "跨标签同步",
+        "修改root data属性以驱动CSS"
+      ],
+      "dependencies": [],
+      "separation": "mixed",
+      "notes": [
+        "已有可注入环境的controller工厂，但与React hook/DOM应用逻辑同文件；适合拆成AppearanceStore和视图适配器。"
+      ]
+    },
+    {
+      "id": "fe-appearance",
+      "title": "外观设置对话框",
+      "kind": "ui",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/AppearanceSettings.tsx",
+          "symbol": "AppearanceSettings",
+          "line": 17
+        }
+      ],
+      "responsibility": "呈现受控皮肤、配色与明暗选项，通过回调更新外观状态。",
+      "features": [
+        "原生dialog焦点管理",
+        "立即生效",
+        "恢复默认",
+        "Escape关闭",
+        "短窗口内容滚动与固定操作区"
+      ],
+      "dependencies": [
+        "fe-theme"
+      ],
+      "separation": "mostly-view",
+      "notes": []
+    },
+    {
+      "id": "fe-cache",
+      "title": "缓存管理对话框",
+      "kind": "ui",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/CacheSettings.tsx",
+          "symbol": "CacheSettings",
+          "line": 12
+        },
+        {
+          "path": "apps/web/src/CacheSettings.tsx",
+          "symbol": "clean",
+          "line": 56
+        }
+      ],
+      "responsibility": "读取后端容量和清理结果，展示保护范围和失败反馈。",
+      "features": [
+        "分类容量",
+        "重新检查",
+        "一键清理",
+        "过期返回隔离",
+        "保留皮肤偏好"
+      ],
+      "dependencies": [
+        "fe-api",
+        "fe-types"
+      ],
+      "separation": "mixed",
+      "notes": [
+        "真正扫描、引用保护、周期回收位于Python后端；本组件仅请求与反馈。",
+        "请求生命周期仍在TSX中，可抽为CacheController。"
+      ]
+    },
+    {
+      "id": "fe-welcome",
+      "title": "欢迎页与角色入口",
+      "kind": "ui",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/SkinWelcome.tsx",
+          "symbol": "SkinAvatar",
+          "line": 3
+        },
+        {
+          "path": "apps/web/src/SkinWelcome.tsx",
+          "symbol": "SkinWelcome",
+          "line": 11
+        }
+      ],
+      "responsibility": "首用状态与插画展示，调用父级导入录播/导入模型回调。",
+      "features": [
+        "猫娘/简洁欢迎状态",
+        "导入录播入口",
+        "导入已有模型入口",
+        "可复用头像"
+      ],
+      "dependencies": [],
+      "separation": "view",
+      "notes": []
+    },
+    {
+      "id": "fe-lyrics",
+      "title": "歌词导入、样式与预览（内嵌App）",
+      "kind": "ui",
+      "group": "frontend",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "importLyrics",
+          "line": 762
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "lyric-preview JSX",
+          "line": 1249
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "LRC upload and subtitle settings JSX",
+          "line": 1626
+        }
+      ],
+      "responsibility": "接受LRC文件/文本、偏移和字幕样式；预览当前歌词行并将配置交给后端导出。",
+      "features": [
+        "LRC文件或粘贴文本导入",
+        "歌词偏移秒数换算为毫秒",
+        "单行/双行/KTV样式选择",
+        "字号、边距、颜色和高亮色",
+        "视频中当前歌词行预览"
+      ],
+      "dependencies": [
+        "fe-api",
+        "fe-types",
+        "fe-project-flow"
+      ],
+      "separation": "mixed",
+      "notes": [
+        "此处还不是独立LyricsEditor组件。",
+        "浏览器显示行级歌词预览；最终字幕渲染由Python/FFmpeg完成。",
+        "当前没有自动搜歌名、抓取歌词或自动逐词对齐界面。"
+      ]
+    }
+  ],
+  "workflows": [
+    {
+      "id": "fe-flow-cut",
+      "title": "上传 → 预览 → 编辑 → 导出",
+      "status": "implemented",
+      "steps": [
+        {
+          "node": "fe-project-flow",
+          "action": "importVideo调用XHR上传，字节进度交给UploadFeedback",
+          "refs": [
+            {
+              "path": "apps/web/src/main.tsx",
+              "symbol": "importVideo",
+              "line": 640
+            },
+            {
+              "path": "apps/web/src/api.ts",
+              "symbol": "uploadForm",
+              "line": 439
+            }
+          ],
+          "endpoints": [
+            "POST /api/projects/upload"
+          ]
+        },
+        {
+          "node": "fe-playback",
+          "action": "默认quality=low；只有low320-v1才算低清就绪，否则请求准备并显示任务状态",
+          "refs": [
+            {
+              "path": "apps/web/src/main.tsx",
+              "symbol": "requestPreview",
+              "line": 332
+            },
+            {
+              "path": "apps/web/src/playback.ts",
+              "symbol": "previewReady",
+              "line": 3
+            }
+          ],
+          "endpoints": [
+            "POST /api/projects/{id}/preview",
+            "GET /api/jobs?project_id={id}",
+            "GET /api/projects/{id}"
+          ]
+        },
+        {
+          "node": "fe-timeline",
+          "action": "拖动/逐帧/时间码只改变草稿与浏览器播放位置，不在浏览器编码视频",
+          "refs": [
+            {
+              "path": "apps/web/src/Timeline.tsx",
+              "symbol": "changeBoundary",
+              "line": 38
+            },
+            {
+              "path": "apps/web/src/main.tsx",
+              "symbol": "boundary",
+              "line": 539
+            }
+          ]
+        },
+        {
+          "node": "fe-project-flow",
+          "action": "校验草稿，带revision保存；409保留本地修改，要求重新载入",
+          "refs": [
+            {
+              "path": "apps/web/src/main.tsx",
+              "symbol": "save",
+              "line": 613
+            },
+            {
+              "path": "apps/web/src/editing.ts",
+              "symbol": "validateProject",
+              "line": 57
+            }
+          ],
+          "endpoints": [
+            "PUT /api/projects/{id}"
+          ]
+        },
+        {
+          "node": "fe-export-controls",
+          "action": "选择精确/快速与规格，提交导出；后台完成后显示MP4/MP3下载",
+          "refs": [
+            {
+              "path": "apps/web/src/main.tsx",
+              "symbol": "run",
+              "line": 693
+            },
+            {
+              "path": "apps/web/src/ExportControls.tsx",
+              "symbol": "ExportControls",
+              "line": 13
+            }
+          ],
+          "endpoints": [
+            "POST /api/projects/{id}/clips/{clip}/export",
+            "GET /api/artifacts/{job}/{file}"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fe-flow-training",
+      "title": "创建训练集 → 标注 → 训练 → 使用模型",
+      "status": "implemented",
+      "steps": [
+        {
+          "node": "fe-training",
+          "action": "输入主播名，创建项目并上传独立录播，区分训练/验证用途",
+          "refs": [
+            {
+              "path": "apps/web/src/TrainingWorkspace.tsx",
+              "symbol": "create",
+              "line": 257
+            },
+            {
+              "path": "apps/web/src/TrainingWorkspace.tsx",
+              "symbol": "importSample",
+              "line": 280
+            }
+          ],
+          "endpoints": [
+            "POST /api/training/datasets",
+            "POST /api/training/datasets/{id}/samples"
+          ]
+        },
+        {
+          "node": "fe-annotation",
+          "action": "设置区间和target/other标签；拒绝重叠，保存前由用户确认完整复核",
+          "refs": [
+            {
+              "path": "apps/web/src/TrainingAnnotation.tsx",
+              "symbol": "addRegion",
+              "line": 112
+            },
+            {
+              "path": "apps/web/src/TrainingWorkspace.tsx",
+              "symbol": "saveSample",
+              "line": 273
+            }
+          ],
+          "endpoints": [
+            "PUT /api/training/datasets/{id}/samples/{sample}"
+          ]
+        },
+        {
+          "node": "fe-training",
+          "action": "客户端准备度和参数预检后提交训练；可见时轮询训练任务，完成后刷新模型库",
+          "refs": [
+            {
+              "path": "apps/web/src/TrainingWorkspace.tsx",
+              "symbol": "trainingReadiness",
+              "line": 44
+            },
+            {
+              "path": "apps/web/src/TrainingWorkspace.tsx",
+              "symbol": "api.startTraining",
+              "line": 780
+            }
+          ],
+          "endpoints": [
+            "POST /api/training/datasets/{id}/train",
+            "GET /api/training/jobs"
+          ]
+        },
+        {
+          "node": "fe-models",
+          "action": "选择训练完成模型回到切歌，保存后可请求演唱检测",
+          "refs": [
+            {
+              "path": "apps/web/src/main.tsx",
+              "symbol": "useModel",
+              "line": 226
+            }
+          ],
+          "endpoints": [
+            "GET /api/models",
+            "POST /api/projects/{id}/detect"
+          ]
+        }
+      ],
+      "notes": [
+        "低配服务器以模型管理替代训练视图；训练计算不在TypeScript中执行。"
+      ]
+    },
+    {
+      "id": "fe-flow-recording",
+      "title": "录制房间 → 归档列表 → 独立剪辑",
+      "status": "implemented",
+      "steps": [
+        {
+          "node": "fe-recordings",
+          "action": "管理员读取状态、添加房间、开关自动录制、开始/停止",
+          "refs": [
+            {
+              "path": "apps/web/src/RecordingsWorkspace.tsx",
+              "symbol": "RecordingsWorkspace",
+              "line": 18
+            }
+          ],
+          "endpoints": [
+            "GET /api/recorder/status",
+            "GET/POST /api/recorder/rooms",
+            "PATCH /api/recorder/rooms/{room}",
+            "POST /api/recorder/rooms/{room}/{action}"
+          ]
+        },
+        {
+          "node": "fe-recordings",
+          "action": "后端收到FileClosed并完成导入后，页面轮询到ready归档记录；失败可重试",
+          "refs": [
+            {
+              "path": "apps/web/src/RecordingsWorkspace.tsx",
+              "symbol": "usePolling",
+              "line": 35
+            }
+          ],
+          "endpoints": [
+            "GET /api/recordings",
+            "POST /api/recordings/{id}/retry"
+          ]
+        },
+        {
+          "node": "fe-project-flow",
+          "action": "打开对应Project；编辑者创建个人副本，草稿独立但源片与预览共享",
+          "refs": [
+            {
+              "path": "apps/web/src/main.tsx",
+              "symbol": "load",
+              "line": 292
+            },
+            {
+              "path": "apps/web/src/main.tsx",
+              "symbol": "cloneProject",
+              "line": 363
+            }
+          ],
+          "endpoints": [
+            "GET /api/projects/{id}",
+            "POST /api/projects/{id}/clone"
+          ]
+        }
+      ],
+      "notes": [
+        "浏览器不是录制器；FileClosed、重试、去重和磁盘保护由Python与独立录播姬完成。"
+      ]
+    },
+    {
+      "id": "fe-flow-theme",
+      "title": "外观选择 → 状态存储 → CSS",
+      "status": "implemented",
+      "steps": [
+        {
+          "node": "fe-appearance",
+          "action": "选择皮肤、配色和明暗；对话框只发onChange/onReset",
+          "refs": [
+            {
+              "path": "apps/web/src/AppearanceSettings.tsx",
+              "symbol": "AppearanceSettings",
+              "line": 17
+            }
+          ]
+        },
+        {
+          "node": "fe-theme",
+          "action": "controller校验、写localStorage、通知快照并设置根节点data属性；系统/其他标签变化也回流",
+          "refs": [
+            {
+              "path": "apps/web/src/theme.ts",
+              "symbol": "createAppearanceController",
+              "line": 55
+            }
+          ]
+        },
+        {
+          "node": "fe-app",
+          "action": "useAppearance接收快照，切换插画显示和主题CSS；不重建编辑工作区",
+          "refs": [
+            {
+              "path": "apps/web/src/theme.ts",
+              "symbol": "useAppearance",
+              "line": 135
+            },
+            {
+              "path": "apps/web/src/main.tsx",
+              "symbol": "App",
+              "line": 122
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fe-flow-cache",
+      "title": "缓存查看 → 后端清理 → 结果反馈",
+      "status": "implemented",
+      "steps": [
+        {
+          "node": "fe-cache",
+          "action": "打开对话框读取分类容量；关闭/重新打开时隔离迟到响应",
+          "refs": [
+            {
+              "path": "apps/web/src/CacheSettings.tsx",
+              "symbol": "CacheSettings",
+              "line": 12
+            }
+          ],
+          "endpoints": [
+            "GET /api/cache"
+          ]
+        },
+        {
+          "node": "fe-api",
+          "action": "携带会话token请求清理；只对明确的失效token拒绝重试一次",
+          "refs": [
+            {
+              "path": "apps/web/src/api.ts",
+              "symbol": "request",
+              "line": 305
+            }
+          ],
+          "endpoints": [
+            "POST /api/cache/clean"
+          ]
+        },
+        {
+          "node": "fe-cache",
+          "action": "呈现实际删除大小、剩余量与占用失败数；前端不会自行删服务器文件",
+          "refs": [
+            {
+              "path": "apps/web/src/CacheSettings.tsx",
+              "symbol": "clean",
+              "line": 56
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "recommendations": [
+    {
+      "id": "ts-contracts",
+      "priority": "P1",
+      "status": "proposed",
+      "title": "先拆传输类型与领域规则",
+      "from": [
+        "apps/web/src/api.ts:1",
+        "apps/web/src/api.ts:493",
+        "apps/web/src/UploadFeedback.tsx:4"
+      ],
+      "targets": [
+        "domain/project.ts",
+        "domain/training.ts",
+        "contracts/dto.ts",
+        "application/upload-state.ts"
+      ],
+      "classes": [],
+      "plan": "把Project/Clip等前端领域类型、HTTP DTO与上传状态移出api/UI文件；projectEdits回到领域快照函数。重用已有editing/playback纯函数，避免领域层依赖API实现文件。",
+      "reason": "当前类型、HTTP、上传与快照混在625行api.ts，业务层还反向从TSX导入上传状态。"
+    },
+    {
+      "id": "ts-http",
+      "priority": "P1",
+      "status": "proposed",
+      "title": "会话、HTTP和上传采用可注入服务类",
+      "from": [
+        "apps/web/src/api.ts:243",
+        "apps/web/src/api.ts:305",
+        "apps/web/src/api.ts:360"
+      ],
+      "targets": [
+        "infrastructure/HttpClient.ts",
+        "infrastructure/SessionManager.ts",
+        "infrastructure/XhrUploader.ts",
+        "infrastructure/StudioGateway.ts"
+      ],
+      "classes": [
+        "HttpClient",
+        "SessionManager",
+        "XhrUploader",
+        "StudioGateway"
+      ],
+      "plan": "类封装会话single-flight、取消与连接生命周期；通过接口注入fetch/XHR工厂，StudioGateway保留业务端点方法。React/Vue组件只调用应用服务。",
+      "reason": "这些对象有状态和生命周期，适合类；不是把36个接口简单套进一个更大的全能类。"
+    },
+    {
+      "id": "ts-draft",
+      "priority": "P1",
+      "status": "proposed",
+      "title": "将App的草稿和用例编排拆开",
+      "from": [
+        "apps/web/src/main.tsx:122",
+        "apps/web/src/main.tsx:279",
+        "apps/web/src/main.tsx:613"
+      ],
+      "targets": [
+        "domain/ProjectDraft.ts",
+        "application/ProjectService.ts",
+        "application/EditorSession.ts",
+        "ui/hooks/useEditorSession.ts"
+      ],
+      "classes": [
+        "ProjectDraft",
+        "ProjectService",
+        "EditorSession"
+      ],
+      "plan": "ProjectDraft管理快照、dirty、片段变更；ProjectService管理加载/保存/克隆等用例；EditorSession暴露可订阅状态，React hook或Vue composable做很薄的适配。",
+      "reason": "App当前31个useState、6个useEffect、20个内部命名处理函数；不要只把1804行App搬进一个God class。"
+    },
+    {
+      "id": "ts-preview",
+      "priority": "P1",
+      "status": "proposed",
+      "title": "统一异步预览与任务生命周期",
+      "from": [
+        "apps/web/src/main.tsx:332",
+        "apps/web/src/TrainingAnnotation.tsx:87",
+        "apps/web/src/polling.ts:2"
+      ],
+      "targets": [
+        "application/PreviewCoordinator.ts",
+        "application/JobMonitor.ts",
+        "ports/MediaPlayerPort.ts"
+      ],
+      "classes": [
+        "PreviewCoordinator",
+        "JobMonitor"
+      ],
+      "plan": "抽出请求去重、任务状态、取消、过期响应、质量切换和播放位置恢复；通过MediaPlayerPort适配video DOM。切歌low/high与训练compatible是不同策略参数，不能强制合并成同一种预览。",
+      "reason": "两套预览仍各自持有轮询、busy/error和版本处理；已有polling.ts可继续复用。"
+    },
+    {
+      "id": "ts-training",
+      "priority": "P2",
+      "status": "proposed",
+      "title": "训练视图只显示，训练/标注会话进入TS",
+      "from": [
+        "apps/web/src/TrainingWorkspace.tsx:44",
+        "apps/web/src/TrainingWorkspace.tsx:88",
+        "apps/web/src/TrainingAnnotation.tsx:112"
+      ],
+      "targets": [
+        "application/TrainingController.ts",
+        "domain/AnnotationDraft.ts",
+        "domain/training-readiness.ts",
+        "ui/TrainingWorkspace.tsx"
+      ],
+      "classes": [
+        "TrainingController",
+        "AnnotationDraft"
+      ],
+      "plan": "状态、加载保存用例进Controller；区间增删/重叠判断进入AnnotationDraft或纯规则；准备度/参数校验保留纯函数；DOM坐标和键盘事件仍由视图适配。",
+      "reason": "901行训练页与532行标注器混合UI、校验、请求及状态，框架迁移时难复用。"
+    },
+    {
+      "id": "ts-workspaces",
+      "priority": "P2",
+      "status": "proposed",
+      "title": "录播、模型与缓存形成小型应用服务",
+      "from": [
+        "apps/web/src/RecordingsWorkspace.tsx:18",
+        "apps/web/src/ModelControls.tsx:201",
+        "apps/web/src/CacheSettings.tsx:12"
+      ],
+      "targets": [
+        "application/RecordingController.ts",
+        "application/ModelLibraryService.ts",
+        "application/CacheController.ts"
+      ],
+      "classes": [
+        "RecordingController",
+        "ModelLibraryService",
+        "CacheController"
+      ],
+      "plan": "收口加载/操作/失败状态和API调用；视图绑定快照、触发明确命令，复用统一TaskState而非反复写busy/error/notice。",
+      "reason": "各工作区当前直接依赖模块级api单例，应用逻辑不能直接交给另一个UI框架复用。"
+    },
+    {
+      "id": "ts-theme",
+      "priority": "P2",
+      "status": "proposed",
+      "title": "保留外观控制器优势，分离框架与DOM",
+      "from": [
+        "apps/web/src/theme.ts:55",
+        "apps/web/src/theme.ts:135"
+      ],
+      "targets": [
+        "application/AppearanceStore.ts",
+        "infrastructure/BrowserAppearanceAdapter.ts",
+        "ui/hooks/useAppearance.ts"
+      ],
+      "classes": [
+        "AppearanceStore"
+      ],
+      "plan": "状态订阅、偏好校验与存储抽为独立TS；document根属性写入与matchMedia封装为浏览器适配器，React/Vue桥接各自独立。",
+      "reason": "已有factory与订阅模式接近目标，只需拆清依赖，不需重写功能。"
+    },
+    {
+      "id": "ts-pure",
+      "priority": "原则",
+      "status": "proposed",
+      "title": "有状态用类，无状态规则继续用纯函数",
+      "from": [
+        "apps/web/src/editing.ts:27",
+        "apps/web/src/playback.ts:3"
+      ],
+      "targets": [
+        "domain/timecode.ts",
+        "domain/clip-rules.ts",
+        "domain/export-policy.ts"
+      ],
+      "classes": [],
+      "plan": "format/parseTimecode、snapToFrame、stepFrames、previewReady、validateProject、parseAppearance继续作为可组合纯函数。把重复的边界夹取与低配/快速导出规则整理为共享函数。",
+      "reason": "复用取决于依赖与职责，类数量不是质量指标。权限/额度/真实文件删除仍必须留在服务端执行。"
+    }
+  ],
+  "notes": [
+    {
+      "status": "implemented",
+      "text": "当前是React+TypeScript，不是Vue；用户的“UI只做视图、逻辑用独立TS”原则同样适用于当前React。"
+    },
+    {
+      "status": "implemented",
+      "text": "前端只负责编排与交互，录制抓流、模型训练/推理、转码、文件删除与权限执行仍由后端或独立服务完成。"
+    },
+    {
+      "status": "not-implemented",
+      "text": "页面明确要求手动填写歌名/原唱，LRC需要导入；已有演唱检测不等于自动歌名识别。",
+      "files": [
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "manual song metadata copy",
+          "line": 1546
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "importLyrics",
+          "line": 762
+        }
+      ]
+    },
+    {
+      "status": "proposed",
+      "text": "推荐的TS服务类是重构目标，不是现有代码已经存在的类；本次审计没有实施重构。"
+    },
+    {
+      "status": "proposed",
+      "text": "TS类建议用于有状态会话/异步用例和资源生命周期；时间码、边界、校验等无状态规则继续使用纯函数。视图层未来可以是React或Vue，但当前不把Vue画为已实现。"
+    }
+  ],
+  "metrics": {
+    "source_files_excluding_dts": 19,
+    "total_lines_excluding_dts": 5986,
+    "explicit_classes": [
+      {
+        "path": "apps/web/src/api.ts",
+        "symbol": "ApiError",
+        "line": 214
+      }
+    ],
+    "api_wrapper_methods": 36,
+    "hotspots": [
+      {
+        "path": "apps/web/src/TrainingAnnotation.tsx",
+        "lines": 532,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 2,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 3,
+            "typeOnly": true
+          },
+          {
+            "module": "./editing",
+            "line": 9,
+            "typeOnly": false
+          },
+          {
+            "module": "./TimecodeInput",
+            "line": 10,
+            "typeOnly": false
+          },
+          {
+            "module": "./OperationProgress",
+            "line": 11,
+            "typeOnly": false
+          },
+          {
+            "module": "./usePolling",
+            "line": 12,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "TrainingAnnotation",
+            "line": 14,
+            "lines": 519
+          },
+          {
+            "symbol": "generatePreview",
+            "line": 87,
+            "lines": 13
+          },
+          {
+            "symbol": "seek",
+            "line": 100,
+            "lines": 5
+          },
+          {
+            "symbol": "pointerTime",
+            "line": 105,
+            "lines": 7
+          },
+          {
+            "symbol": "addRegion",
+            "line": 112,
+            "lines": 23
+          },
+          {
+            "symbol": "markBoundary",
+            "line": 135,
+            "lines": 11
+          },
+          {
+            "symbol": "shortcuts",
+            "line": 147,
+            "lines": 55
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useRef": 2,
+          "useState": 15,
+          "useEffect": 2,
+          "usePolling": 1
+        },
+        "apiMethods": [],
+        "jsxElements": 61
+      },
+      {
+        "path": "apps/web/src/TrainingWorkspace.tsx",
+        "lines": 901,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          },
+          {
+            "module": "react",
+            "line": 2,
+            "typeOnly": true
+          },
+          {
+            "module": "./api",
+            "line": 3,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 4,
+            "typeOnly": true
+          },
+          {
+            "module": "./TrainingAnnotation",
+            "line": 12,
+            "typeOnly": false
+          },
+          {
+            "module": "./usePolling",
+            "line": 13,
+            "typeOnly": false
+          },
+          {
+            "module": "./UploadFeedback",
+            "line": 14,
+            "typeOnly": false
+          },
+          {
+            "module": "./UploadFeedback",
+            "line": 15,
+            "typeOnly": true
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "trainingReadiness",
+            "line": 44,
+            "lines": 43
+          },
+          {
+            "symbol": "TrainingWorkspace",
+            "line": 88,
+            "lines": 814
+          },
+          {
+            "symbol": "accept",
+            "line": 166,
+            "lines": 13
+          },
+          {
+            "symbol": "operation",
+            "line": 240,
+            "lines": 12
+          },
+          {
+            "symbol": "canSwitch",
+            "line": 252,
+            "lines": 5
+          },
+          {
+            "symbol": "create",
+            "line": 257,
+            "lines": 16
+          },
+          {
+            "symbol": "saveSample",
+            "line": 273,
+            "lines": 7
+          },
+          {
+            "symbol": "importSample",
+            "line": 280,
+            "lines": 32
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useState": 15,
+          "useRef": 5,
+          "useEffect": 3,
+          "usePolling": 1
+        },
+        "apiMethods": [],
+        "jsxElements": 127
+      },
+      {
+        "path": "apps/web/src/api.ts",
+        "lines": 625,
+        "imports": [],
+        "functions": [
+          {
+            "symbol": "errorMessage",
+            "line": 227,
+            "lines": 8
+          },
+          {
+            "symbol": "expiredSession",
+            "line": 235,
+            "lines": 8
+          },
+          {
+            "symbol": "getSession",
+            "line": 243,
+            "lines": 37
+          },
+          {
+            "symbol": "withAbort",
+            "line": 280,
+            "lines": 25
+          },
+          {
+            "symbol": "request",
+            "line": 305,
+            "lines": 45
+          },
+          {
+            "symbol": "sendUpload",
+            "line": 360,
+            "lines": 77
+          },
+          {
+            "symbol": "uploadForm",
+            "line": 439,
+            "lines": 44
+          },
+          {
+            "symbol": "projectEdits",
+            "line": 493,
+            "lines": 7
+          }
+        ],
+        "classes": [
+          {
+            "symbol": "ApiError",
+            "line": 214
+          }
+        ],
+        "hooks": {},
+        "apiMethods": [
+          {
+            "name": "recorderStatus",
+            "line": 501
+          },
+          {
+            "name": "recorderRooms",
+            "line": 503
+          },
+          {
+            "name": "recordings",
+            "line": 505
+          },
+          {
+            "name": "addRecorderRoom",
+            "line": 507
+          },
+          {
+            "name": "configureRecorderRoom",
+            "line": 509
+          },
+          {
+            "name": "recorderAction",
+            "line": 515
+          },
+          {
+            "name": "retryRecording",
+            "line": 517
+          },
+          {
+            "name": "clone",
+            "line": 518
+          },
+          {
+            "name": "cancelJob",
+            "line": 519
+          },
+          {
+            "name": "cache",
+            "line": 520
+          },
+          {
+            "name": "cleanCache",
+            "line": 521
+          },
+          {
+            "name": "trainingDatasets",
+            "line": 522
+          },
+          {
+            "name": "trainingDataset",
+            "line": 523
+          },
+          {
+            "name": "createTrainingDataset",
+            "line": 525
+          },
+          {
+            "name": "uploadTrainingSample",
+            "line": 527
+          },
+          {
+            "name": "saveTrainingSample",
+            "line": 543
+          },
+          {
+            "name": "deleteTrainingSample",
+            "line": 557
+          },
+          {
+            "name": "trainingMedia",
+            "line": 566
+          },
+          {
+            "name": "trainingPreview",
+            "line": 568
+          },
+          {
+            "name": "startTraining",
+            "line": 570
+          },
+          {
+            "name": "trainingJobs",
+            "line": 575
+          },
+          {
+            "name": "cancelTraining",
+            "line": 577
+          },
+          {
+            "name": "models",
+            "line": 579
+          },
+          {
+            "name": "uploadModel",
+            "line": 580
+          },
+          {
+            "name": "projects",
+            "line": 586
+          },
+          {
+            "name": "project",
+            "line": 587
+          },
+          {
+            "name": "capabilities",
+            "line": 589
+          },
+          {
+            "name": "jobs",
+            "line": 590
+          },
+          {
+            "name": "upload",
+            "line": 595
+          },
+          {
+            "name": "save",
+            "line": 604
+          },
+          {
+            "name": "detect",
+            "line": 614
+          },
+          {
+            "name": "preview",
+            "line": 615
+          },
+          {
+            "name": "export",
+            "line": 617
+          },
+          {
+            "name": "lyrics",
+            "line": 619
+          },
+          {
+            "name": "media",
+            "line": 621
+          },
+          {
+            "name": "artifact",
+            "line": 623
+          }
+        ],
+        "jsxElements": 0
+      },
+      {
+        "path": "apps/web/src/main.tsx",
+        "lines": 1930,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          },
+          {
+            "module": "react-dom/client",
+            "line": 2,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 3,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 4,
+            "typeOnly": true
+          },
+          {
+            "module": "./editing",
+            "line": 12,
+            "typeOnly": false
+          },
+          {
+            "module": "./Timeline",
+            "line": 20,
+            "typeOnly": false
+          },
+          {
+            "module": "./TimecodeInput",
+            "line": 21,
+            "typeOnly": false
+          },
+          {
+            "module": "./ExportControls",
+            "line": 22,
+            "typeOnly": false
+          },
+          {
+            "module": "./ModelControls",
+            "line": 23,
+            "typeOnly": false
+          },
+          {
+            "module": "./RecordingsWorkspace",
+            "line": 24,
+            "typeOnly": false
+          },
+          {
+            "module": "./playback",
+            "line": 25,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 26,
+            "typeOnly": true
+          },
+          {
+            "module": "./TrainingWorkspace",
+            "line": 27,
+            "typeOnly": false
+          },
+          {
+            "module": "./UploadFeedback",
+            "line": 28,
+            "typeOnly": false
+          },
+          {
+            "module": "./UploadFeedback",
+            "line": 29,
+            "typeOnly": true
+          },
+          {
+            "module": "./OperationProgress",
+            "line": 30,
+            "typeOnly": false
+          },
+          {
+            "module": "./usePolling",
+            "line": 31,
+            "typeOnly": false
+          },
+          {
+            "module": "./CacheSettings",
+            "line": 32,
+            "typeOnly": false
+          },
+          {
+            "module": "./AppearanceSettings",
+            "line": 33,
+            "typeOnly": false
+          },
+          {
+            "module": "./theme",
+            "line": 34,
+            "typeOnly": false
+          },
+          {
+            "module": "./SkinWelcome",
+            "line": 35,
+            "typeOnly": false
+          },
+          {
+            "module": "./styles.css",
+            "line": 36,
+            "typeOnly": false
+          },
+          {
+            "module": "./training.css",
+            "line": 37,
+            "typeOnly": false
+          },
+          {
+            "module": "./SkinWelcome.css",
+            "line": 38,
+            "typeOnly": false
+          },
+          {
+            "module": "./themes.css",
+            "line": 39,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "Icon",
+            "line": 57,
+            "lines": 65
+          },
+          {
+            "symbol": "App",
+            "line": 122,
+            "lines": 1804
+          },
+          {
+            "symbol": "switchWorkspace",
+            "line": 205,
+            "lines": 5
+          },
+          {
+            "symbol": "openModelLibrary",
+            "line": 210,
+            "lines": 8
+          },
+          {
+            "symbol": "refreshCatalog",
+            "line": 218,
+            "lines": 8
+          },
+          {
+            "symbol": "useModel",
+            "line": 226,
+            "lines": 17
+          },
+          {
+            "symbol": "accept",
+            "line": 279,
+            "lines": 13
+          },
+          {
+            "symbol": "load",
+            "line": 292,
+            "lines": 27
+          },
+          {
+            "symbol": "fail",
+            "line": 319,
+            "lines": 3
+          },
+          {
+            "symbol": "refreshPreview",
+            "line": 322,
+            "lines": 10
+          },
+          {
+            "symbol": "requestPreview",
+            "line": 332,
+            "lines": 27
+          },
+          {
+            "symbol": "cloneProject",
+            "line": 363,
+            "lines": 15
+          },
+          {
+            "symbol": "cancelJob",
+            "line": 378,
+            "lines": 10
+          },
+          {
+            "symbol": "updateClip",
+            "line": 522,
+            "lines": 10
+          },
+          {
+            "symbol": "seek",
+            "line": 532,
+            "lines": 7
+          },
+          {
+            "symbol": "boundary",
+            "line": 539,
+            "lines": 14
+          },
+          {
+            "symbol": "shortcuts",
+            "line": 554,
+            "lines": 46
+          },
+          {
+            "symbol": "save",
+            "line": 613,
+            "lines": 27
+          },
+          {
+            "symbol": "importVideo",
+            "line": 640,
+            "lines": 53
+          },
+          {
+            "symbol": "run",
+            "line": 693,
+            "lines": 28
+          },
+          {
+            "symbol": "addClip",
+            "line": 721,
+            "lines": 41
+          },
+          {
+            "symbol": "importLyrics",
+            "line": 762,
+            "lines": 16
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useAppearance": 1,
+          "useState": 31,
+          "useRef": 8,
+          "useEffect": 6,
+          "usePolling": 1
+        },
+        "apiMethods": [],
+        "jsxElements": 261
+      }
+    ],
+    "all_files": [
+      {
+        "path": "apps/web/src/AppearanceSettings.tsx",
+        "lines": 186,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          },
+          {
+            "module": "./theme",
+            "line": 2,
+            "typeOnly": true
+          },
+          {
+            "module": "./assets/skins/green-eyed-catgirl.png",
+            "line": 8,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "AppearanceSettings",
+            "line": 17,
+            "lines": 170
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useRef": 1,
+          "useId": 2,
+          "useEffect": 1
+        },
+        "apiMethods": [],
+        "jsxElements": 45
+      },
+      {
+        "path": "apps/web/src/CacheSettings.tsx",
+        "lines": 156,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 2,
+            "typeOnly": false
+          },
+          {
+            "module": "./cache-settings.css",
+            "line": 3,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "CacheSettings",
+            "line": 12,
+            "lines": 145
+          },
+          {
+            "symbol": "clean",
+            "line": 56,
+            "lines": 21
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useRef": 2,
+          "useState": 6,
+          "useEffect": 1
+        },
+        "apiMethods": [],
+        "jsxElements": 22
+      },
+      {
+        "path": "apps/web/src/ExportControls.tsx",
+        "lines": 251,
+        "imports": [
+          {
+            "module": "./api",
+            "line": 1,
+            "typeOnly": true
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "ExportControls",
+            "line": 13,
+            "lines": 239
+          }
+        ],
+        "classes": [],
+        "hooks": {},
+        "apiMethods": [],
+        "jsxElements": 52
+      },
+      {
+        "path": "apps/web/src/ModelControls.tsx",
+        "lines": 356,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 2,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 3,
+            "typeOnly": true
+          },
+          {
+            "module": "./model-controls.css",
+            "line": 4,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "ModelSelector",
+            "line": 6,
+            "lines": 194
+          },
+          {
+            "symbol": "ModelManager",
+            "line": 201,
+            "lines": 156
+          },
+          {
+            "symbol": "importModel",
+            "line": 216,
+            "lines": 20
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useState": 6,
+          "useRef": 3
+        },
+        "apiMethods": [],
+        "jsxElements": 61
+      },
+      {
+        "path": "apps/web/src/OperationProgress.tsx",
+        "lines": 22,
+        "imports": [],
+        "functions": [
+          {
+            "symbol": "OperationProgress",
+            "line": 1,
+            "lines": 22
+          }
+        ],
+        "classes": [],
+        "hooks": {},
+        "apiMethods": [],
+        "jsxElements": 6
+      },
+      {
+        "path": "apps/web/src/RecordingsWorkspace.tsx",
+        "lines": 259,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 2,
+            "typeOnly": false
+          },
+          {
+            "module": "./usePolling",
+            "line": 8,
+            "typeOnly": false
+          },
+          {
+            "module": "./recordings.css",
+            "line": 9,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "RecordingsWorkspace",
+            "line": 18,
+            "lines": 242
+          },
+          {
+            "symbol": "act",
+            "line": 66,
+            "lines": 12
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useState": 8,
+          "useRef": 1,
+          "usePolling": 1
+        },
+        "apiMethods": [],
+        "jsxElements": 40
+      },
+      {
+        "path": "apps/web/src/SkinWelcome.tsx",
+        "lines": 63,
+        "imports": [
+          {
+            "module": "./assets/skins/green-eyed-catgirl.png",
+            "line": 1,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "SkinAvatar",
+            "line": 3,
+            "lines": 7
+          },
+          {
+            "symbol": "SkinWelcome",
+            "line": 11,
+            "lines": 53
+          }
+        ],
+        "classes": [],
+        "hooks": {},
+        "apiMethods": [],
+        "jsxElements": 14
+      },
+      {
+        "path": "apps/web/src/TimecodeInput.tsx",
+        "lines": 92,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          },
+          {
+            "module": "./editing",
+            "line": 2,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "TimecodeInput",
+            "line": 13,
+            "lines": 80
+          },
+          {
+            "symbol": "edit",
+            "line": 34,
+            "lines": 16
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useState": 2,
+          "useRef": 2,
+          "useEffect": 1
+        },
+        "apiMethods": [],
+        "jsxElements": 2
+      },
+      {
+        "path": "apps/web/src/Timeline.tsx",
+        "lines": 197,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          },
+          {
+            "module": "react",
+            "line": 2,
+            "typeOnly": true
+          },
+          {
+            "module": "./api",
+            "line": 3,
+            "typeOnly": true
+          },
+          {
+            "module": "./editing",
+            "line": 4,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "Timeline",
+            "line": 16,
+            "lines": 182
+          },
+          {
+            "symbol": "pointerTime",
+            "line": 28,
+            "lines": 10
+          },
+          {
+            "symbol": "changeBoundary",
+            "line": 38,
+            "lines": 11
+          },
+          {
+            "symbol": "handleKey",
+            "line": 49,
+            "lines": 17
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useRef": 1
+        },
+        "apiMethods": [],
+        "jsxElements": 26
+      },
+      {
+        "path": "apps/web/src/TrainingAnnotation.tsx",
+        "lines": 532,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 2,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 3,
+            "typeOnly": true
+          },
+          {
+            "module": "./editing",
+            "line": 9,
+            "typeOnly": false
+          },
+          {
+            "module": "./TimecodeInput",
+            "line": 10,
+            "typeOnly": false
+          },
+          {
+            "module": "./OperationProgress",
+            "line": 11,
+            "typeOnly": false
+          },
+          {
+            "module": "./usePolling",
+            "line": 12,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "TrainingAnnotation",
+            "line": 14,
+            "lines": 519
+          },
+          {
+            "symbol": "generatePreview",
+            "line": 87,
+            "lines": 13
+          },
+          {
+            "symbol": "seek",
+            "line": 100,
+            "lines": 5
+          },
+          {
+            "symbol": "pointerTime",
+            "line": 105,
+            "lines": 7
+          },
+          {
+            "symbol": "addRegion",
+            "line": 112,
+            "lines": 23
+          },
+          {
+            "symbol": "markBoundary",
+            "line": 135,
+            "lines": 11
+          },
+          {
+            "symbol": "shortcuts",
+            "line": 147,
+            "lines": 55
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useRef": 2,
+          "useState": 15,
+          "useEffect": 2,
+          "usePolling": 1
+        },
+        "apiMethods": [],
+        "jsxElements": 61
+      },
+      {
+        "path": "apps/web/src/TrainingWorkspace.tsx",
+        "lines": 901,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          },
+          {
+            "module": "react",
+            "line": 2,
+            "typeOnly": true
+          },
+          {
+            "module": "./api",
+            "line": 3,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 4,
+            "typeOnly": true
+          },
+          {
+            "module": "./TrainingAnnotation",
+            "line": 12,
+            "typeOnly": false
+          },
+          {
+            "module": "./usePolling",
+            "line": 13,
+            "typeOnly": false
+          },
+          {
+            "module": "./UploadFeedback",
+            "line": 14,
+            "typeOnly": false
+          },
+          {
+            "module": "./UploadFeedback",
+            "line": 15,
+            "typeOnly": true
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "trainingReadiness",
+            "line": 44,
+            "lines": 43
+          },
+          {
+            "symbol": "TrainingWorkspace",
+            "line": 88,
+            "lines": 814
+          },
+          {
+            "symbol": "accept",
+            "line": 166,
+            "lines": 13
+          },
+          {
+            "symbol": "operation",
+            "line": 240,
+            "lines": 12
+          },
+          {
+            "symbol": "canSwitch",
+            "line": 252,
+            "lines": 5
+          },
+          {
+            "symbol": "create",
+            "line": 257,
+            "lines": 16
+          },
+          {
+            "symbol": "saveSample",
+            "line": 273,
+            "lines": 7
+          },
+          {
+            "symbol": "importSample",
+            "line": 280,
+            "lines": 32
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useState": 15,
+          "useRef": 5,
+          "useEffect": 3,
+          "usePolling": 1
+        },
+        "apiMethods": [],
+        "jsxElements": 127
+      },
+      {
+        "path": "apps/web/src/UploadFeedback.tsx",
+        "lines": 62,
+        "imports": [
+          {
+            "module": "./api",
+            "line": 1,
+            "typeOnly": true
+          },
+          {
+            "module": "./OperationProgress",
+            "line": 2,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "UploadFeedback",
+            "line": 19,
+            "lines": 44
+          }
+        ],
+        "classes": [],
+        "hooks": {},
+        "apiMethods": [],
+        "jsxElements": 4
+      },
+      {
+        "path": "apps/web/src/api.ts",
+        "lines": 625,
+        "imports": [],
+        "functions": [
+          {
+            "symbol": "errorMessage",
+            "line": 227,
+            "lines": 8
+          },
+          {
+            "symbol": "expiredSession",
+            "line": 235,
+            "lines": 8
+          },
+          {
+            "symbol": "getSession",
+            "line": 243,
+            "lines": 37
+          },
+          {
+            "symbol": "withAbort",
+            "line": 280,
+            "lines": 25
+          },
+          {
+            "symbol": "request",
+            "line": 305,
+            "lines": 45
+          },
+          {
+            "symbol": "sendUpload",
+            "line": 360,
+            "lines": 77
+          },
+          {
+            "symbol": "uploadForm",
+            "line": 439,
+            "lines": 44
+          },
+          {
+            "symbol": "projectEdits",
+            "line": 493,
+            "lines": 7
+          }
+        ],
+        "classes": [
+          {
+            "symbol": "ApiError",
+            "line": 214
+          }
+        ],
+        "hooks": {},
+        "apiMethods": [
+          {
+            "name": "recorderStatus",
+            "line": 501
+          },
+          {
+            "name": "recorderRooms",
+            "line": 503
+          },
+          {
+            "name": "recordings",
+            "line": 505
+          },
+          {
+            "name": "addRecorderRoom",
+            "line": 507
+          },
+          {
+            "name": "configureRecorderRoom",
+            "line": 509
+          },
+          {
+            "name": "recorderAction",
+            "line": 515
+          },
+          {
+            "name": "retryRecording",
+            "line": 517
+          },
+          {
+            "name": "clone",
+            "line": 518
+          },
+          {
+            "name": "cancelJob",
+            "line": 519
+          },
+          {
+            "name": "cache",
+            "line": 520
+          },
+          {
+            "name": "cleanCache",
+            "line": 521
+          },
+          {
+            "name": "trainingDatasets",
+            "line": 522
+          },
+          {
+            "name": "trainingDataset",
+            "line": 523
+          },
+          {
+            "name": "createTrainingDataset",
+            "line": 525
+          },
+          {
+            "name": "uploadTrainingSample",
+            "line": 527
+          },
+          {
+            "name": "saveTrainingSample",
+            "line": 543
+          },
+          {
+            "name": "deleteTrainingSample",
+            "line": 557
+          },
+          {
+            "name": "trainingMedia",
+            "line": 566
+          },
+          {
+            "name": "trainingPreview",
+            "line": 568
+          },
+          {
+            "name": "startTraining",
+            "line": 570
+          },
+          {
+            "name": "trainingJobs",
+            "line": 575
+          },
+          {
+            "name": "cancelTraining",
+            "line": 577
+          },
+          {
+            "name": "models",
+            "line": 579
+          },
+          {
+            "name": "uploadModel",
+            "line": 580
+          },
+          {
+            "name": "projects",
+            "line": 586
+          },
+          {
+            "name": "project",
+            "line": 587
+          },
+          {
+            "name": "capabilities",
+            "line": 589
+          },
+          {
+            "name": "jobs",
+            "line": 590
+          },
+          {
+            "name": "upload",
+            "line": 595
+          },
+          {
+            "name": "save",
+            "line": 604
+          },
+          {
+            "name": "detect",
+            "line": 614
+          },
+          {
+            "name": "preview",
+            "line": 615
+          },
+          {
+            "name": "export",
+            "line": 617
+          },
+          {
+            "name": "lyrics",
+            "line": 619
+          },
+          {
+            "name": "media",
+            "line": 621
+          },
+          {
+            "name": "artifact",
+            "line": 623
+          }
+        ],
+        "jsxElements": 0
+      },
+      {
+        "path": "apps/web/src/editing.ts",
+        "lines": 109,
+        "imports": [
+          {
+            "module": "./api",
+            "line": 1,
+            "typeOnly": true
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "normalizeProject",
+            "line": 15,
+            "lines": 12
+          },
+          {
+            "symbol": "formatTimecode",
+            "line": 27,
+            "lines": 4
+          },
+          {
+            "symbol": "parseTimecode",
+            "line": 31,
+            "lines": 12
+          },
+          {
+            "symbol": "validateProject",
+            "line": 57,
+            "lines": 53
+          }
+        ],
+        "classes": [],
+        "hooks": {},
+        "apiMethods": [],
+        "jsxElements": 0
+      },
+      {
+        "path": "apps/web/src/main.tsx",
+        "lines": 1930,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          },
+          {
+            "module": "react-dom/client",
+            "line": 2,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 3,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 4,
+            "typeOnly": true
+          },
+          {
+            "module": "./editing",
+            "line": 12,
+            "typeOnly": false
+          },
+          {
+            "module": "./Timeline",
+            "line": 20,
+            "typeOnly": false
+          },
+          {
+            "module": "./TimecodeInput",
+            "line": 21,
+            "typeOnly": false
+          },
+          {
+            "module": "./ExportControls",
+            "line": 22,
+            "typeOnly": false
+          },
+          {
+            "module": "./ModelControls",
+            "line": 23,
+            "typeOnly": false
+          },
+          {
+            "module": "./RecordingsWorkspace",
+            "line": 24,
+            "typeOnly": false
+          },
+          {
+            "module": "./playback",
+            "line": 25,
+            "typeOnly": false
+          },
+          {
+            "module": "./api",
+            "line": 26,
+            "typeOnly": true
+          },
+          {
+            "module": "./TrainingWorkspace",
+            "line": 27,
+            "typeOnly": false
+          },
+          {
+            "module": "./UploadFeedback",
+            "line": 28,
+            "typeOnly": false
+          },
+          {
+            "module": "./UploadFeedback",
+            "line": 29,
+            "typeOnly": true
+          },
+          {
+            "module": "./OperationProgress",
+            "line": 30,
+            "typeOnly": false
+          },
+          {
+            "module": "./usePolling",
+            "line": 31,
+            "typeOnly": false
+          },
+          {
+            "module": "./CacheSettings",
+            "line": 32,
+            "typeOnly": false
+          },
+          {
+            "module": "./AppearanceSettings",
+            "line": 33,
+            "typeOnly": false
+          },
+          {
+            "module": "./theme",
+            "line": 34,
+            "typeOnly": false
+          },
+          {
+            "module": "./SkinWelcome",
+            "line": 35,
+            "typeOnly": false
+          },
+          {
+            "module": "./styles.css",
+            "line": 36,
+            "typeOnly": false
+          },
+          {
+            "module": "./training.css",
+            "line": 37,
+            "typeOnly": false
+          },
+          {
+            "module": "./SkinWelcome.css",
+            "line": 38,
+            "typeOnly": false
+          },
+          {
+            "module": "./themes.css",
+            "line": 39,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "Icon",
+            "line": 57,
+            "lines": 65
+          },
+          {
+            "symbol": "App",
+            "line": 122,
+            "lines": 1804
+          },
+          {
+            "symbol": "switchWorkspace",
+            "line": 205,
+            "lines": 5
+          },
+          {
+            "symbol": "openModelLibrary",
+            "line": 210,
+            "lines": 8
+          },
+          {
+            "symbol": "refreshCatalog",
+            "line": 218,
+            "lines": 8
+          },
+          {
+            "symbol": "useModel",
+            "line": 226,
+            "lines": 17
+          },
+          {
+            "symbol": "accept",
+            "line": 279,
+            "lines": 13
+          },
+          {
+            "symbol": "load",
+            "line": 292,
+            "lines": 27
+          },
+          {
+            "symbol": "fail",
+            "line": 319,
+            "lines": 3
+          },
+          {
+            "symbol": "refreshPreview",
+            "line": 322,
+            "lines": 10
+          },
+          {
+            "symbol": "requestPreview",
+            "line": 332,
+            "lines": 27
+          },
+          {
+            "symbol": "cloneProject",
+            "line": 363,
+            "lines": 15
+          },
+          {
+            "symbol": "cancelJob",
+            "line": 378,
+            "lines": 10
+          },
+          {
+            "symbol": "updateClip",
+            "line": 522,
+            "lines": 10
+          },
+          {
+            "symbol": "seek",
+            "line": 532,
+            "lines": 7
+          },
+          {
+            "symbol": "boundary",
+            "line": 539,
+            "lines": 14
+          },
+          {
+            "symbol": "shortcuts",
+            "line": 554,
+            "lines": 46
+          },
+          {
+            "symbol": "save",
+            "line": 613,
+            "lines": 27
+          },
+          {
+            "symbol": "importVideo",
+            "line": 640,
+            "lines": 53
+          },
+          {
+            "symbol": "run",
+            "line": 693,
+            "lines": 28
+          },
+          {
+            "symbol": "addClip",
+            "line": 721,
+            "lines": 41
+          },
+          {
+            "symbol": "importLyrics",
+            "line": 762,
+            "lines": 16
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useAppearance": 1,
+          "useState": 31,
+          "useRef": 8,
+          "useEffect": 6,
+          "usePolling": 1
+        },
+        "apiMethods": [],
+        "jsxElements": 261
+      },
+      {
+        "path": "apps/web/src/playback.ts",
+        "lines": 28,
+        "imports": [
+          {
+            "module": "./api",
+            "line": 1,
+            "typeOnly": true
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "previewReady",
+            "line": 3,
+            "lines": 9
+          },
+          {
+            "symbol": "mergePreviewMetadata",
+            "line": 14,
+            "lines": 15
+          }
+        ],
+        "classes": [],
+        "hooks": {},
+        "apiMethods": [],
+        "jsxElements": 0
+      },
+      {
+        "path": "apps/web/src/polling.ts",
+        "lines": 53,
+        "imports": [],
+        "functions": [
+          {
+            "symbol": "startVisiblePolling",
+            "line": 2,
+            "lines": 52
+          },
+          {
+            "symbol": "run",
+            "line": 19,
+            "lines": 20
+          },
+          {
+            "symbol": "visibilityChanged",
+            "line": 39,
+            "lines": 6
+          }
+        ],
+        "classes": [],
+        "hooks": {},
+        "apiMethods": [],
+        "jsxElements": 0
+      },
+      {
+        "path": "apps/web/src/theme.ts",
+        "lines": 146,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "parseAppearance",
+            "line": 22,
+            "lines": 28
+          },
+          {
+            "symbol": "createAppearanceController",
+            "line": 55,
+            "lines": 78
+          },
+          {
+            "symbol": "useAppearance",
+            "line": 135,
+            "lines": 12
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useSyncExternalStore": 1
+        },
+        "apiMethods": [],
+        "jsxElements": 0
+      },
+      {
+        "path": "apps/web/src/usePolling.ts",
+        "lines": 18,
+        "imports": [
+          {
+            "module": "react",
+            "line": 1,
+            "typeOnly": false
+          },
+          {
+            "module": "./polling",
+            "line": 2,
+            "typeOnly": false
+          }
+        ],
+        "functions": [
+          {
+            "symbol": "usePolling",
+            "line": 4,
+            "lines": 15
+          }
+        ],
+        "classes": [],
+        "hooks": {
+          "useRef": 1,
+          "useEffect": 1
+        },
+        "apiMethods": [],
+        "jsxElements": 0
+      }
+    ],
+    "methodology": "physical lines excluding final newline and vite-env.d.ts; functions counts are named function declarations, not all arrow callbacks; hook counts exclude ordinary useModel action; API count includes URL helpers."
+  }
+}

@@ -117,7 +117,7 @@ See the [development guide](docs/DEVELOPMENT.md) for setup, desktop debugging, a
 - [Model guide](docs/MODELS.md) — model sources, formats, and AutoSlicer usage
 - [Server deployment](docs/DEPLOYMENT.md) — Docker, domains, and persistent data
 - [Release maintenance](docs/RELEASING.md) — automated builds and publishing
-- [Architecture](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md)
+- [Architecture](docs/ARCHITECTURE.md) · [Interactive code atlas](docs/architecture/README.md) · [Roadmap](docs/ROADMAP.md)
 
 The detailed guides are currently written in Chinese. Documentation translations are welcome.
 

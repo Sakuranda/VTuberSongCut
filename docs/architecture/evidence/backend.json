@@ -1,0 +1,2369 @@
+{
+  "schema": 1,
+  "snapshot": "333104dab5cc25c6c59a6ae2f79a49f11a6160f1",
+  "auditDate": "2026-10-29",
+  "scope": "backend-read-only",
+  "nodeCount": 22,
+  "nodes": [
+    {
+      "id": "be-domain",
+      "title": "项目、片段与任务契约",
+      "layer": "domain",
+      "kind": "class",
+      "status": "implemented",
+      "summary": "Pydantic 记录约束时间、字幕、导出参数、项目所有权和任务状态，是 API 与存储共同使用的数据形状。",
+      "files": [
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "Project",
+          "line": 97
+        },
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "Clip",
+          "line": 77
+        },
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "Job",
+          "line": 130
+        },
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "ExportSettings",
+          "line": 58
+        },
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "LyricCue",
+          "line": 27
+        }
+      ],
+      "dependencies": [],
+      "features": [
+        "源录播绝对毫秒时间轴",
+        "片段/歌词范围校验",
+        "共享源录播与个人副本",
+        "快速/精确导出规格"
+      ],
+      "notes": [
+        "schema_version 当前为 1；训练记录和任务描述仍有 dict，并非全部已有强类型领域对象。"
+      ]
+    },
+    {
+      "id": "be-ports",
+      "title": "扩展能力协议",
+      "layer": "domain",
+      "kind": "protocols",
+      "status": "partial",
+      "summary": "声明检测、识歌、歌词、渲染、封面、标题和发布边界；只有部分边界已有实际适配器。",
+      "files": [
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "SingingDetector",
+          "line": 7
+        },
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "ClipRenderer",
+          "line": 23
+        },
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "SongIdentifier",
+          "line": 11
+        },
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "LyricsAligner",
+          "line": 19
+        },
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "Publisher",
+          "line": 35
+        }
+      ],
+      "dependencies": [
+        "be-domain"
+      ],
+      "features": [
+        "检测器 Protocol",
+        "未来能力接口"
+      ],
+      "notes": [
+        "这不是已经实现的动态插件系统。SongIdentifier、LyricsProvider、LyricsAligner、CoverGenerator、TitleGenerator、Publisher 只有协议。Studio 的渲染依赖目前仍直接标注 FFmpegMedia。"
+      ]
+    },
+    {
+      "id": "be-api",
+      "title": "HTTP 入口与服务组装",
+      "layer": "application",
+      "kind": "module",
+      "status": "implemented",
+      "summary": "create_app 先取得工作目录锁，再创建各服务；_create_app 同时承担 HTTP 路由、鉴权、响应整形、生命周期和录播导入回调。",
+      "files": [
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "create_app",
+          "line": 80
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "_create_app",
+          "line": 101
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "_create_app.protect_service",
+          "line": 210
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "_create_app.lifespan",
+          "line": 178
+        }
+      ],
+      "dependencies": [
+        "be-domain",
+        "be-studio",
+        "be-jobs",
+        "be-store",
+        "be-models",
+        "be-training",
+        "be-recorder",
+        "be-recorder-api",
+        "be-cache",
+        "be-preview-maintenance",
+        "be-access",
+        "be-resource-policy",
+        "be-execution",
+        "be-runtime"
+      ],
+      "features": [
+        "项目与媒体 API",
+        "模型/训练 API",
+        "服务启动与关闭",
+        "账号会话令牌与访问控制"
+      ],
+      "notes": [
+        "646 行集中承担组装、路由与部分应用规则，是后续拆分的主要后端热点。"
+      ]
+    },
+    {
+      "id": "be-studio",
+      "title": "切歌应用服务 Studio",
+      "layer": "application",
+      "kind": "class",
+      "status": "implemented",
+      "summary": "将检测、预览、导出与歌词导入组织成可排队的应用用例；保存输入快照、结果复用与编辑合并规则。",
+      "files": [
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "Studio",
+          "line": 30
+        },
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "Studio.detect",
+          "line": 60
+        },
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "Studio.preview",
+          "line": 103
+        },
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "Studio.export",
+          "line": 133
+        },
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "Studio._export",
+          "line": 152
+        },
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "source_signature",
+          "line": 17
+        }
+      ],
+      "dependencies": [
+        "be-domain",
+        "be-jobs",
+        "be-store",
+        "be-media",
+        "be-detector",
+        "be-lyrics",
+        "be-resource-policy",
+        "be-execution"
+      ],
+      "features": [
+        "检测结果追加且保留已有片段",
+        "共享低/高预览",
+        "按参数复用导出媒体",
+        "每个用户独立导出快照",
+        "LRC 导入"
+      ],
+      "notes": [
+        "source_signature 是路径、大小、mtime_ns 的签名，不是整份媒体内容 SHA。模型选项或原片变化时拒绝应用旧检测结果。"
+      ]
+    },
+    {
+      "id": "be-jobs",
+      "title": "有界任务队列 JobRunner",
+      "layer": "application",
+      "kind": "class",
+      "status": "implemented",
+      "summary": "以一个工作线程执行媒体重任务；注册结构化处理器，按任务所有者切换、限制总量和每人数量，并持久化状态。",
+      "files": [
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner",
+          "line": 10
+        },
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner.submit",
+          "line": 57
+        },
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner.restore",
+          "line": 35
+        },
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner._worker",
+          "line": 77
+        },
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner.cancel",
+          "line": 113
+        }
+      ],
+      "dependencies": [
+        "be-domain",
+        "be-store",
+        "be-resource-policy",
+        "be-execution"
+      ],
+      "features": [
+        "排队、进度、取消、超时",
+        "相同活动请求去重",
+        "结构化任务恢复",
+        "每项目互斥"
+      ],
+      "notes": [
+        "训练另有 TrainingService 的线程池，不通过该队列。旧闭包任务不能重放；重启标为 interrupted。这里是单工作空间/单进程设计，不是分布式队列。"
+      ]
+    },
+    {
+      "id": "be-store",
+      "title": "SQLite 项目与任务存储",
+      "layer": "infrastructure",
+      "kind": "class",
+      "status": "implemented",
+      "summary": "提供连接事务、项目/任务快照、乐观版本校验和缓存索引。",
+      "files": [
+        {
+          "path": "services/studio/studio/store.py",
+          "symbol": "Store",
+          "line": 12
+        },
+        {
+          "path": "services/studio/studio/store.py",
+          "symbol": "Store.save",
+          "line": 48
+        },
+        {
+          "path": "services/studio/studio/store.py",
+          "symbol": "Store.update_media",
+          "line": 58
+        },
+        {
+          "path": "services/studio/studio/store.py",
+          "symbol": "Store.cached_job",
+          "line": 96
+        }
+      ],
+      "dependencies": [
+        "be-domain"
+      ],
+      "features": [
+        "SQLite WAL",
+        "修改冲突返回 409",
+        "媒体元数据更新不增加编辑 revision",
+        "任务与渲染缓存查找"
+      ],
+      "notes": [
+        "models、training_*、recordings 等表由各服务使用 Store.connect 直接管理；数据库访问尚未完全收敛到独立 Repository。"
+      ]
+    },
+    {
+      "id": "be-media",
+      "title": "媒体适配器 FFmpegMedia",
+      "layer": "infrastructure",
+      "kind": "class",
+      "status": "implemented",
+      "summary": "包装 FFprobe 与 FFmpeg，处理素材探测、低/高预览、兼容封装、精确/快速裁切和字幕烧录。",
+      "files": [
+        {
+          "path": "services/studio/studio/adapters/media.py",
+          "symbol": "FFmpegMedia",
+          "line": 24
+        },
+        {
+          "path": "services/studio/studio/adapters/media.py",
+          "symbol": "FFmpegMedia.metadata",
+          "line": 124
+        },
+        {
+          "path": "services/studio/studio/adapters/media.py",
+          "symbol": "FFmpegMedia.preview",
+          "line": 150
+        },
+        {
+          "path": "services/studio/studio/adapters/media.py",
+          "symbol": "FFmpegMedia._run_preview",
+          "line": 236
+        },
+        {
+          "path": "services/studio/studio/adapters/media.py",
+          "symbol": "FFmpegMedia.render",
+          "line": 288
+        }
+      ],
+      "dependencies": [
+        "be-domain",
+        "be-lyrics",
+        "be-execution"
+      ],
+      "features": [
+        "320p/24fps 省流预览",
+        "最高1080p/30fps 高清",
+        "H.264/AAC 兼容码流复制",
+        "MP4 与 MP3",
+        "真实 FFmpeg 处理进度"
+      ],
+      "notes": [
+        "快速导出受关键帧影响，不能保证逐帧切点；使用字幕、改变画质需精确导出。预览与导出读取源素材，导出不会改用320p文件。"
+      ]
+    },
+    {
+      "id": "be-lyrics",
+      "title": "歌词解析与字幕渲染",
+      "layer": "domain",
+      "kind": "pure-functions",
+      "status": "implemented",
+      "summary": "将已有 LRC 转为时间化歌词，再将片段歌词生成 ASS；单行、经典双行和 KTV 布局使用同一字幕数据。",
+      "files": [
+        {
+          "path": "services/studio/studio/adapters/lyrics.py",
+          "symbol": "parse_lrc",
+          "line": 8
+        },
+        {
+          "path": "services/studio/studio/adapters/lyrics.py",
+          "symbol": "render_ass",
+          "line": 55
+        },
+        {
+          "path": "services/studio/studio/adapters/lyrics.py",
+          "symbol": "escape_ass",
+          "line": 46
+        }
+      ],
+      "dependencies": [
+        "be-domain"
+      ],
+      "features": [
+        "LRC 偏移与时间裁剪",
+        "三种 ASS 布局",
+        "字幕文本转义"
+      ],
+      "notes": [
+        "没有在线歌词搜索或自动逐字对齐。仅在已提供真实 words 时间时生成逐字高亮。纯转换函数可继续复用，不需要为每个函数造类。"
+      ]
+    },
+    {
+      "id": "be-models",
+      "title": "模型库 ModelLibrary",
+      "layer": "application",
+      "kind": "class",
+      "status": "implemented",
+      "summary": "隔离模型校验、登记、查找和运行设备选择；以内容 SHA-256 去重，保存受管模型和元信息。",
+      "files": [
+        {
+          "path": "services/studio/studio/model_library.py",
+          "symbol": "ModelLibrary",
+          "line": 43
+        },
+        {
+          "path": "services/studio/studio/model_library.py",
+          "symbol": "ModelLibrary.register_file",
+          "line": 137
+        },
+        {
+          "path": "services/studio/studio/model_library.py",
+          "symbol": "ModelLibrary.resolve",
+          "line": 115
+        },
+        {
+          "path": "services/studio/studio/model_library.py",
+          "symbol": "ModelLibrary.runtime",
+          "line": 74
+        }
+      ],
+      "dependencies": [
+        "be-domain",
+        "be-store",
+        "be-model-probe",
+        "be-runtime"
+      ],
+      "features": [
+        "兼容 .pt/.pth 导入",
+        "来源与架构元信息",
+        "校验值去重",
+        "CPU/MPS/CUDA 可用性探测"
+      ],
+      "notes": [
+        "运行环境探测有进程内缓存。模型注册使用独立暂存副本，验证后原子移入 models/managed；不是声纹向量库。"
+      ]
+    },
+    {
+      "id": "be-model-probe",
+      "title": "隔离模型验证进程",
+      "layer": "infrastructure",
+      "kind": "worker",
+      "status": "implemented",
+      "summary": "在独立解释器中加载权重并实际跑一次小输入，验证模型格式、时间分辨率与有限数值。",
+      "files": [
+        {
+          "path": "services/studio/studio/model_probe.py",
+          "symbol": "main",
+          "line": 8
+        }
+      ],
+      "dependencies": [],
+      "features": [
+        "weights_only=True",
+        "先映射CPU",
+        "CRNN/TCN 兼容检查",
+        "80维mel与3.125fps约定"
+      ],
+      "notes": [
+        "只接受 AutoSlicer 完整检查点；RVC 等音色转换模型不属于这个接口。"
+      ]
+    },
+    {
+      "id": "be-detector",
+      "title": "演唱检测适配器",
+      "layer": "infrastructure",
+      "kind": "class",
+      "status": "implemented",
+      "summary": "把统一 detect 调用转换为 AutoSlicer 子进程，再把 segments.json 转为项目 Clip。",
+      "files": [
+        {
+          "path": "services/studio/studio/adapters/autoslicer.py",
+          "symbol": "AutoSlicerDetector",
+          "line": 11
+        },
+        {
+          "path": "services/studio/studio/adapters/autoslicer.py",
+          "symbol": "AutoSlicerDetector.detect",
+          "line": 17
+        }
+      ],
+      "dependencies": [
+        "be-domain",
+        "be-inference",
+        "be-runtime",
+        "be-execution"
+      ],
+      "features": [
+        "CPU/auto 路由到流式worker",
+        "显式GPU沿用原上游推理",
+        "检测区间映射到源毫秒时间"
+      ],
+      "notes": [
+        "输出默认“待识别歌曲”，不是自动识别歌名。上游调用与 HTTP/UI 隔离。"
+      ]
+    },
+    {
+      "id": "be-inference",
+      "title": "CPU流式推理进程",
+      "layer": "infrastructure",
+      "kind": "worker",
+      "status": "implemented",
+      "summary": "单次FFmpeg音频管道按窗口背压读取，复用上游LogMel、模型和后处理，仅低帧率概率序列随时长增长。",
+      "files": [
+        {
+          "path": "services/studio/studio/inference_worker.py",
+          "symbol": "main",
+          "line": 163
+        },
+        {
+          "path": "services/studio/studio/inference_worker.py",
+          "symbol": "decoded_audio",
+          "line": 75
+        },
+        {
+          "path": "services/studio/studio/inference_worker.py",
+          "symbol": "pcm_windows",
+          "line": 57
+        },
+        {
+          "path": "services/studio/studio/inference_worker.py",
+          "symbol": "predict_stream",
+          "line": 114
+        },
+        {
+          "path": "services/studio/studio/inference_worker.py",
+          "symbol": "window_settings",
+          "line": 29
+        }
+      ],
+      "dependencies": [],
+      "features": [
+        "16kHz单声道流式音频",
+        "CPU线程上限",
+        "窗口重叠拼接",
+        "区间和概率输出"
+      ],
+      "notes": [
+        "CRNN默认120秒/重叠30秒；TCN保留600秒上下文。auto若解析为GPU会委派上游原infer.py。性能与真实准确率需要目标机器和真实录播验证。"
+      ]
+    },
+    {
+      "id": "be-training",
+      "title": "训练应用服务 TrainingService",
+      "layer": "application",
+      "kind": "class",
+      "status": "implemented",
+      "summary": "管理训练数据集、样本、标注和训练任务，校验训练/验证隔离并保存不可变任务快照。",
+      "files": [
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "TrainingService",
+          "line": 111
+        },
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "validate_training_dataset",
+          "line": 76
+        },
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "TrainingService.start",
+          "line": 229
+        },
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "TrainingService._run",
+          "line": 288
+        },
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "TrainingService.cancel",
+          "line": 425
+        }
+      ],
+      "dependencies": [
+        "be-store",
+        "be-training-worker",
+        "be-models",
+        "be-runtime"
+      ],
+      "features": [
+        "标注与版本冲突检查",
+        "训练/验证源文件哈希去重",
+        "独立训练任务、日志与进度",
+        "完成后登记模型",
+        "取消与记录进程清理"
+      ],
+      "notes": [
+        "有独立单线程执行器及自有进程生命周期；不是 JobRunner 的任务类型。低配服务器由 API 禁止启动训练。训练状态/样本目前使用 dict。"
+      ]
+    },
+    {
+      "id": "be-training-worker",
+      "title": "训练数据准备与上游训练",
+      "layer": "infrastructure",
+      "kind": "worker",
+      "status": "implemented",
+      "summary": "读取训练快照，复核素材哈希，提取LogMel及帧标签，调用上游 train.py，再检查最终权重和指标。",
+      "files": [
+        {
+          "path": "services/studio/studio/training_worker.py",
+          "symbol": "main",
+          "line": 23
+        },
+        {
+          "path": "services/studio/studio/training_worker.py",
+          "symbol": "atomic_json",
+          "line": 17
+        }
+      ],
+      "dependencies": [
+        "be-runtime"
+      ],
+      "features": [
+        "CPU准备特征",
+        "正/负标签对齐",
+        "写训练/验证manifest",
+        "原上游训练入口",
+        "有限值权重检查"
+      ],
+      "notes": [
+        "网页训练流程固定CRNN、单输出二分类（目标演唱/其余）；导入模型可以是兼容TCN，但不代表UI已有TCN训练选项。准备特征仍是每份素材提取，不能把CPU推理的流式优化误标成训练也已流式。"
+      ]
+    },
+    {
+      "id": "be-recorder",
+      "title": "录播姬适配与持久导入",
+      "layer": "application",
+      "kind": "class",
+      "status": "implemented",
+      "summary": "RecorderClient 控制外部录播姬；RecorderService 验证文件完成事件、去重、排队导入并监测录制盘空间。",
+      "files": [
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderClient",
+          "line": 64
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderService",
+          "line": 151
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderService.accept",
+          "line": 185
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderService.process_one",
+          "line": 303
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderService.guard_disk",
+          "line": 269
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderClient.configure_webhook",
+          "line": 122
+        }
+      ],
+      "dependencies": [
+        "be-store"
+      ],
+      "features": [
+        "房间添加/自动录制/开始停止",
+        "FileClosed事件幂等",
+        "文件稳定性与路径检查",
+        "后台导入有界重试",
+        "磁盘不足暂停与告警",
+        "回调自动配置"
+      ],
+      "notes": [
+        "实际拉流和写录播的是独立 BililiveRecorder，不是拾歌Python自行实现B站拉流。导入通过注入回调回到 api.py 创建共享Project；媒体计算再进入JobRunner。"
+      ]
+    },
+    {
+      "id": "be-recorder-api",
+      "title": "录播HTTP路由",
+      "layer": "application",
+      "kind": "router",
+      "status": "implemented",
+      "summary": "独立 APIRouter 将管理界面操作与录制事件映射到 RecorderService/RecorderClient。",
+      "files": [
+        {
+          "path": "services/studio/studio/recording_api.py",
+          "symbol": "recording_router",
+          "line": 23
+        },
+        {
+          "path": "services/studio/studio/recording_api.py",
+          "symbol": "recording_router.webhook",
+          "line": 64
+        }
+      ],
+      "dependencies": [
+        "be-recorder"
+      ],
+      "features": [
+        "连接状态与录播列表",
+        "房间管理API",
+        "导入失败重试",
+        "独立密钥验证Webhook"
+      ],
+      "notes": [
+        "仅准确匹配的webhook POST路径不使用浏览器Basic/会话校验，路由仍独立验证token并拒绝Origin。事件体上限64KiB；其他录制管理操作由主API限制管理员。"
+      ]
+    },
+    {
+      "id": "be-cache",
+      "title": "运行缓存回收 RuntimeCache",
+      "layer": "infrastructure",
+      "kind": "class",
+      "status": "implemented",
+      "summary": "根据项目引用和任务状态筛选可再生缓存；手工清理无年龄等待，自动任务按7天保留期每小时检查。",
+      "files": [
+        {
+          "path": "services/studio/studio/cache.py",
+          "symbol": "RuntimeCache",
+          "line": 17
+        },
+        {
+          "path": "services/studio/studio/cache.py",
+          "symbol": "RuntimeCache.candidates",
+          "line": 35
+        },
+        {
+          "path": "services/studio/studio/cache.py",
+          "symbol": "RuntimeCache.clean",
+          "line": 135
+        },
+        {
+          "path": "services/studio/studio/cache.py",
+          "symbol": "RuntimeCache.start",
+          "line": 163
+        }
+      ],
+      "dependencies": [
+        "be-domain",
+        "be-store",
+        "be-studio",
+        "be-media"
+      ],
+      "features": [
+        "分类容量与清理报告",
+        "保护原片/模型/导出/当前预览",
+        "活动任务保护",
+        "共享派生文件识别",
+        "失败文件继续保留"
+      ],
+      "notes": [
+        "这是服务端文件缓存管理，不是清空浏览器所有缓存；构建产物清理另在 scripts/clean.py。"
+      ]
+    },
+    {
+      "id": "be-preview-maintenance",
+      "title": "后台预览补齐",
+      "layer": "application",
+      "kind": "class",
+      "status": "implemented",
+      "summary": "启动后定期检查缺少低清预览的项目，留出交互队列余量后提交共享预览任务。",
+      "files": [
+        {
+          "path": "services/studio/studio/media_maintenance.py",
+          "symbol": "PreviewMaintenance",
+          "line": 7
+        },
+        {
+          "path": "services/studio/studio/media_maintenance.py",
+          "symbol": "PreviewMaintenance.sweep",
+          "line": 13
+        }
+      ],
+      "dependencies": [
+        "be-studio",
+        "be-jobs",
+        "be-store",
+        "be-training"
+      ],
+      "features": [
+        "既有项目补生成320p",
+        "训练期间让出计算",
+        "失败/取消不无限重试",
+        "每15秒调度检查"
+      ],
+      "notes": [
+        "直接读取 runner._jobs 等内部状态，是后续封装队列统计接口的候选点。"
+      ]
+    },
+    {
+      "id": "be-access",
+      "title": "身份、角色与服务入口策略",
+      "layer": "policy",
+      "kind": "class",
+      "status": "implemented",
+      "summary": "ServerConfig 区分本机和服务器入口；Access 从配置读取命名账户，并判断共享/私人项目的查看与编辑权限。",
+      "files": [
+        {
+          "path": "services/studio/studio/access.py",
+          "symbol": "Access",
+          "line": 21
+        },
+        {
+          "path": "services/studio/studio/access.py",
+          "symbol": "Access.identify",
+          "line": 43
+        },
+        {
+          "path": "services/studio/studio/access.py",
+          "symbol": "Access.view",
+          "line": 58
+        },
+        {
+          "path": "services/studio/studio/access.py",
+          "symbol": "Access.edit",
+          "line": 61
+        },
+        {
+          "path": "services/studio/studio/server_config.py",
+          "symbol": "ServerConfig",
+          "line": 12
+        }
+      ],
+      "dependencies": [
+        "be-domain"
+      ],
+      "features": [
+        "admin/editor/viewer",
+        "配置式HTTP Basic账户",
+        "个人草稿所有权",
+        "Origin/Host配置"
+      ],
+      "notes": [
+        "不是OAuth或公开注册系统，账号来自环境JSON或服务端文件。实际请求级授权和用户绑定会话令牌仍由api.py执行。ServerConfig.authenticate保留着旧Basic校验函数，当前主入口使用Access.identify。"
+      ]
+    },
+    {
+      "id": "be-resource-policy",
+      "title": "低配预算与请求限流",
+      "layer": "policy",
+      "kind": "class",
+      "status": "implemented",
+      "summary": "ResourcePolicy 校验磁盘、上传、导出和计算预算；RequestLimits 在multipart写入和媒体响应期间执行连接/带宽限制。",
+      "files": [
+        {
+          "path": "services/studio/studio/resources.py",
+          "symbol": "ResourcePolicy",
+          "line": 25
+        },
+        {
+          "path": "services/studio/studio/resources.py",
+          "symbol": "ResourcePolicy.validate_export",
+          "line": 62
+        },
+        {
+          "path": "services/studio/studio/request_limits.py",
+          "symbol": "RequestLimits",
+          "line": 12
+        },
+        {
+          "path": "services/studio/studio/request_limits.py",
+          "symbol": "RequestLimits.__call__",
+          "line": 24
+        }
+      ],
+      "dependencies": [],
+      "features": [
+        "上传大小/并发/磁盘余量",
+        "任务数量与时限配置",
+        "低配导出规格",
+        "媒体/高清连接数",
+        "总发送预算"
+      ],
+      "notes": [
+        "请求限制作用于当前进程，因此需要工作目录锁约束单实例。环境默认值是可配置保护值，不等于已验证的实际承载人数。"
+      ]
+    },
+    {
+      "id": "be-execution",
+      "title": "任务取消、进程树与工作目录锁",
+      "layer": "infrastructure",
+      "kind": "runtime-policy",
+      "status": "implemented",
+      "summary": "execution 使用任务上下文传播取消和截止时间，管理自身子进程组；WorkspaceLease 防止同一数据目录启动第二个服务。",
+      "files": [
+        {
+          "path": "services/studio/studio/execution.py",
+          "symbol": "task_scope",
+          "line": 18
+        },
+        {
+          "path": "services/studio/studio/execution.py",
+          "symbol": "run_process",
+          "line": 76
+        },
+        {
+          "path": "services/studio/studio/execution.py",
+          "symbol": "watch_process",
+          "line": 56
+        },
+        {
+          "path": "services/studio/studio/execution.py",
+          "symbol": "stop_process",
+          "line": 36
+        },
+        {
+          "path": "services/studio/studio/workspace_lease.py",
+          "symbol": "WorkspaceLease",
+          "line": 6
+        }
+      ],
+      "dependencies": [],
+      "features": [
+        "超时/取消传播",
+        "POSIX进程组与Windows任务树停止",
+        "单工作目录独占",
+        "初始化/关闭释放资源"
+      ],
+      "notes": [
+        "锁在服务恢复逻辑之前取得。不能把该进程内预算画成跨主机分布式调度。"
+      ]
+    },
+    {
+      "id": "be-runtime",
+      "title": "运行路径与桌面/源码启动适配",
+      "layer": "infrastructure",
+      "kind": "module",
+      "status": "implemented",
+      "summary": "Settings 给出数据和上游位置；runtime/launcher 在源码、冻结桌面包和独立模型解释器之间构造同一种worker入口。",
+      "files": [
+        {
+          "path": "services/studio/studio/config.py",
+          "symbol": "Settings",
+          "line": 8
+        },
+        {
+          "path": "services/studio/studio/runtime.py",
+          "symbol": "data_root",
+          "line": 21
+        },
+        {
+          "path": "services/studio/studio/runtime.py",
+          "symbol": "worker_command",
+          "line": 49
+        },
+        {
+          "path": "services/studio/studio/runtime.py",
+          "symbol": "configure_runtime",
+          "line": 35
+        },
+        {
+          "path": "services/studio/studio/launcher.py",
+          "symbol": "main",
+          "line": 25
+        }
+      ],
+      "dependencies": [],
+      "features": [
+        "源码/桌面数据目录",
+        "探测/准备/训练/推理worker派发",
+        "内置FFmpeg与字体路径",
+        "桌面ready/shutdown协议"
+      ],
+      "notes": [
+        "HTTP最终由同一 create_app 构建。这里负责启动和环境，不应放项目编辑规则。"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "be-ports",
+      "to": "be-domain",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-domain",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-studio",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-jobs",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-store",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-models",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-training",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-recorder",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-recorder-api",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-cache",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-preview-maintenance",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-access",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-resource-policy",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-execution",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-api",
+      "to": "be-runtime",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-domain",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-jobs",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-store",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-media",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-detector",
+      "kind": "injected",
+      "label": "注入检测器"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-lyrics",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-resource-policy",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-execution",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-jobs",
+      "to": "be-domain",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-jobs",
+      "to": "be-store",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-jobs",
+      "to": "be-resource-policy",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-jobs",
+      "to": "be-execution",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-store",
+      "to": "be-domain",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-media",
+      "to": "be-domain",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-media",
+      "to": "be-lyrics",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-media",
+      "to": "be-execution",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-lyrics",
+      "to": "be-domain",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-models",
+      "to": "be-domain",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-models",
+      "to": "be-store",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-models",
+      "to": "be-model-probe",
+      "kind": "subprocess",
+      "label": "独立进程调用"
+    },
+    {
+      "from": "be-models",
+      "to": "be-runtime",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-detector",
+      "to": "be-domain",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-detector",
+      "to": "be-inference",
+      "kind": "subprocess",
+      "label": "独立进程调用"
+    },
+    {
+      "from": "be-detector",
+      "to": "be-runtime",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-detector",
+      "to": "be-execution",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-training",
+      "to": "be-store",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-training",
+      "to": "be-training-worker",
+      "kind": "subprocess",
+      "label": "独立进程调用"
+    },
+    {
+      "from": "be-training",
+      "to": "be-models",
+      "kind": "callback",
+      "label": "完成后登记回调"
+    },
+    {
+      "from": "be-training",
+      "to": "be-runtime",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-training-worker",
+      "to": "be-runtime",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-recorder",
+      "to": "be-store",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-recorder-api",
+      "to": "be-recorder",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-cache",
+      "to": "be-domain",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-cache",
+      "to": "be-store",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-cache",
+      "to": "be-studio",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-cache",
+      "to": "be-media",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-preview-maintenance",
+      "to": "be-studio",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-preview-maintenance",
+      "to": "be-jobs",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-preview-maintenance",
+      "to": "be-store",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-preview-maintenance",
+      "to": "be-training",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-access",
+      "to": "be-domain",
+      "kind": "uses",
+      "label": "调用/依赖"
+    },
+    {
+      "from": "be-recorder",
+      "to": "be-api",
+      "kind": "callback",
+      "label": "完成文件登记回调"
+    },
+    {
+      "from": "be-runtime",
+      "to": "be-api",
+      "kind": "bootstrap",
+      "label": "launcher启动HTTP服务"
+    },
+    {
+      "from": "be-inference",
+      "to": "external-ffmpeg",
+      "kind": "subprocess",
+      "label": "PCM解码管道"
+    },
+    {
+      "from": "be-inference",
+      "to": "external-autoslicer",
+      "kind": "external-code",
+      "label": "模型/LogMel/后处理"
+    },
+    {
+      "from": "be-training-worker",
+      "to": "external-autoslicer",
+      "kind": "subprocess",
+      "label": "原train.py"
+    },
+    {
+      "from": "be-model-probe",
+      "to": "external-autoslicer",
+      "kind": "external-code",
+      "label": "检查模型形状和设备"
+    },
+    {
+      "from": "be-media",
+      "to": "external-ffmpeg",
+      "kind": "subprocess",
+      "label": "探测/预览/导出"
+    },
+    {
+      "from": "be-recorder",
+      "to": "external-recorder",
+      "kind": "http",
+      "label": "房间与配置REST"
+    },
+    {
+      "from": "external-recorder",
+      "to": "be-recorder-api",
+      "kind": "webhook",
+      "label": "FileClosed完成通知"
+    },
+    {
+      "from": "be-store",
+      "to": "external-sqlite",
+      "kind": "storage",
+      "label": "事务与快照"
+    }
+  ],
+  "workflows": [
+    {
+      "id": "upload-preview",
+      "title": "上传录播 → 默认320p",
+      "status": "implemented",
+      "entry": "POST /api/projects/upload",
+      "steps": [
+        {
+          "node": "be-api",
+          "action": "校验身份并接收上传；copy_upload落盘、probe/metadata读取素材规格",
+          "refs": [
+            {
+              "path": "services/studio/studio/api.py",
+              "symbol": "_create_app.upload",
+              "line": 302
+            }
+          ]
+        },
+        {
+          "node": "be-resource-policy",
+          "action": "在请求流与复制阶段检查体积、并发和磁盘余量"
+        },
+        {
+          "node": "be-store",
+          "action": "保存带owner和源路径的Project；原片独立于预览"
+        },
+        {
+          "node": "be-studio",
+          "action": "按源签名+规格寻找/提交共享low预览"
+        },
+        {
+          "node": "be-jobs",
+          "action": "执行位空闲后调用已注册的preview处理器"
+        },
+        {
+          "node": "be-media",
+          "action": "生成low320-v1文件，进度来自FFmpeg；原子替换临时输出"
+        },
+        {
+          "node": "be-store",
+          "action": "update_media写入预览元数据，不增加编辑revision"
+        },
+        {
+          "node": "be-api",
+          "action": "GET项目/任务供UI更新；GET media?quality=low播放"
+        }
+      ],
+      "guardrails": [
+        "队列满时原片/Project仍保留，后台补齐或用户重试",
+        "低清缺失不会由当前服务器API默默返回高清",
+        "原始时间轴用于所有编辑"
+      ]
+    },
+    {
+      "id": "record-import",
+      "title": "B站录制完成 → 共享录播入库",
+      "status": "implemented",
+      "entry": "POST /api/recorder/webhook",
+      "steps": [
+        {
+          "node": "be-recorder-api",
+          "action": "收到外部BililiveRecorder FileClosed，检查独立密钥和64KiB上限"
+        },
+        {
+          "node": "be-recorder",
+          "action": "用EventId持久去重；检查相对路径与记录身份，写入有界导入队列"
+        },
+        {
+          "node": "be-recorder",
+          "action": "后台process_one检查大小/mtime/文件身份稳定，再调用注入的import_recording回调"
+        },
+        {
+          "node": "be-api",
+          "action": "使用确定项目ID创建或复用shared Project，只引用录播目录原片",
+          "refs": [
+            {
+              "path": "services/studio/studio/api.py",
+              "symbol": "_create_app.import_recording",
+              "line": 140
+            }
+          ]
+        },
+        {
+          "node": "be-studio",
+          "action": "将预览计算另行提交JobRunner，快速结束文件登记"
+        },
+        {
+          "node": "be-api",
+          "action": "录播库返回状态；编辑者clone建立个人草稿"
+        }
+      ],
+      "guardrails": [
+        "实际直播拉流在外部录播姬",
+        "先处理已关闭分段，不读取正在写入的文件",
+        "仅元信息导入，不复制完整原片",
+        "独立录制盘水位检查会关闭自动录制并尝试停止"
+      ]
+    },
+    {
+      "id": "detection",
+      "title": "选择模型 → 检出演唱区间",
+      "status": "implemented",
+      "entry": "POST /api/projects/{id}/detect",
+      "steps": [
+        {
+          "node": "be-api",
+          "action": "校验项目写权限、已保存模型选择及训练互斥"
+        },
+        {
+          "node": "be-models",
+          "action": "解析模型、验证SHA、选择设备；低配模式强制CPU"
+        },
+        {
+          "node": "be-studio",
+          "action": "构造源身份/模型/窗口设置缓存键，保存结构化任务"
+        },
+        {
+          "node": "be-jobs",
+          "action": "按预算执行或恢复任务，绑定取消和时限"
+        },
+        {
+          "node": "be-detector",
+          "action": "通过worker_command启动独立模型进程"
+        },
+        {
+          "node": "be-inference",
+          "action": "CPU流式PCM窗口 → LogMel → 模型概率 → 原上游后处理"
+        },
+        {
+          "node": "be-studio",
+          "action": "检查原片及模型选择未变化，合并不重叠片段至最新项目"
+        },
+        {
+          "node": "be-store",
+          "action": "版本校验保存，已有手动片段不被清空"
+        }
+      ],
+      "guardrails": [
+        "识别目标主播演唱时间，不返回歌名/原唱/歌词",
+        "窗口变更进入缓存键",
+        "新UI轮询获取结果，推理不在浏览器执行"
+      ]
+    },
+    {
+      "id": "training",
+      "title": "人工标注 → 本地训练 → 模型入库",
+      "status": "implemented",
+      "entry": "POST /api/training/datasets/{id}/train",
+      "steps": [
+        {
+          "node": "be-training",
+          "action": "保存样本及target/other标注，检查复核、源哈希、训练/验证独立性"
+        },
+        {
+          "node": "be-api",
+          "action": "管理员权限；低配服务器拒绝训练；启动前检查媒体任务互斥"
+        },
+        {
+          "node": "be-training",
+          "action": "写入dataset/settings快照和training_jobs，启动自身独立线程池"
+        },
+        {
+          "node": "be-training-worker",
+          "action": "重验源哈希、提取CPU LogMel，写npy特征/标签和manifest"
+        },
+        {
+          "node": "be-runtime",
+          "action": "启动上游train.py，当前GUI流程固定CRNN二分类"
+        },
+        {
+          "node": "be-training-worker",
+          "action": "检查best.pt权重/指标有限且分类语义一致，写result.json"
+        },
+        {
+          "node": "be-training",
+          "action": "观察日志/进度并调用register_model回调"
+        },
+        {
+          "node": "be-models",
+          "action": "独立探测后登记受管模型，切歌工作区可选择"
+        }
+      ],
+      "guardrails": [
+        "训练不是JobRunner中的一项；有独立队列与恢复语义",
+        "正常重启不会声称从训练中间步自动续训",
+        "删除样本记录仍保留源文件，以保护任务快照"
+      ]
+    },
+    {
+      "id": "edit-export",
+      "title": "个人剪辑 → 快速/精确导出",
+      "status": "implemented",
+      "entry": "PUT /api/projects/{id}; POST /api/projects/{id}/clips/{clip}/export",
+      "steps": [
+        {
+          "node": "be-access",
+          "action": "共享录播可看；editor创建个人副本后才能修改"
+        },
+        {
+          "node": "be-store",
+          "action": "按revision保存片段/模型设置，拒绝旧版本静默覆盖"
+        },
+        {
+          "node": "be-studio",
+          "action": "导出固定项目快照、裁切参数和渲染缓存键"
+        },
+        {
+          "node": "be-resource-policy",
+          "action": "检查时长、分辨率/帧率/编码及fast模式限制"
+        },
+        {
+          "node": "be-jobs",
+          "action": "排队执行，重复请求去重，保持归属与取消权限"
+        },
+        {
+          "node": "be-media",
+          "action": "精确模式从原片编码所选片段；fast复制兼容码流；可生成MP4+MP3"
+        },
+        {
+          "node": "be-lyrics",
+          "action": "需要烧录时生成ASS，只有已有真实词时间才逐字高亮"
+        },
+        {
+          "node": "be-studio",
+          "action": "同参数可复用媒体字节，但每个项目生成独立snapshot"
+        },
+        {
+          "node": "be-api",
+          "action": "检查项目/任务下载权限，通过受限媒体通道返回产物"
+        }
+      ],
+      "guardrails": [
+        "导出从高清原片，不从320p预览",
+        "fast边界受关键帧影响",
+        "播放器拖动只改变浏览器位置，不产生导出任务"
+      ]
+    },
+    {
+      "id": "cache-maintenance",
+      "title": "缓存扫描 → 安全回收",
+      "status": "implemented",
+      "entry": "GET /api/cache; POST /api/cache/clean; hourly background",
+      "steps": [
+        {
+          "node": "be-api",
+          "action": "限制管理员入口"
+        },
+        {
+          "node": "be-cache",
+          "action": "从数据库快照建立源文件、在用预览和活动任务保护集合"
+        },
+        {
+          "node": "be-cache",
+          "action": "限定目录与文件模式查找可再生缓存，拒绝链接跳转"
+        },
+        {
+          "node": "be-cache",
+          "action": "手工清理或按7天周期策略清理；部分失败保留并计数"
+        },
+        {
+          "node": "be-store",
+          "action": "旧任务预览产物清理后同步移除下载项"
+        }
+      ],
+      "guardrails": [
+        "不删除原始录播、受管模型和导出成品",
+        "浏览器偏好与静态资源缓存不是该服务端扫描对象",
+        "构建目录清理与运行缓存是两套机制"
+      ]
+    }
+  ],
+  "storage": [
+    {
+      "path": "<data>/studio.sqlite3",
+      "owners": [
+        "be-store",
+        "be-training",
+        "be-models",
+        "be-recorder"
+      ],
+      "purpose": "项目/任务/模型/训练/录播记录共用SQLite文件",
+      "tables": {
+        "projects": "Store",
+        "jobs": "Store",
+        "models": "ModelLibrary",
+        "training_datasets": "TrainingService",
+        "training_jobs": "TrainingService",
+        "recordings": "RecorderService",
+        "recorder_events": "RecorderService",
+        "recorder_state": "RecorderService"
+      },
+      "retention": "持久保留；项目和数据集通过revision防冲突"
+    },
+    {
+      "path": "<data>/media/<uuid>/source.<ext>",
+      "owners": [
+        "be-api"
+      ],
+      "purpose": "上传的源视频/音频",
+      "retention": "原片保留；上传失败删除该次未完成目录"
+    },
+    {
+      "path": "<recorder-root>/<relative-file>",
+      "owners": [
+        "external-recorder"
+      ],
+      "purpose": "录播姬写入的原始分段，拾歌只读引用",
+      "retention": "拾歌不删除源录播；必须使用唯一归档文件名"
+    },
+    {
+      "path": "<data>/previews/<source-signature>-<profile>.mp4",
+      "owners": [
+        "be-studio",
+        "be-media"
+      ],
+      "purpose": "所有个人副本共用的低/高预览",
+      "retention": "项目或活动任务引用时保留；可再生孤立缓存可回收"
+    },
+    {
+      "path": "<data>/detections/<key>.json",
+      "owners": [
+        "be-studio"
+      ],
+      "purpose": "按源身份、模型和推理参数复用演唱区间",
+      "retention": "非活动任务缓存可回收；已保存Project.clips不受影响"
+    },
+    {
+      "path": "<data>/jobs/<job-id>/",
+      "owners": [
+        "be-studio",
+        "be-detector",
+        "be-media"
+      ],
+      "purpose": "检测日志/概率/segments.json，或导出MP4/MP3/ASS/项目快照",
+      "retention": "概率和旧预览等指定缓存可回收；导出成品、日志和快照保留"
+    },
+    {
+      "path": "<data>/models/managed/<sha256>.pt",
+      "owners": [
+        "be-models"
+      ],
+      "purpose": "验证后登记的模型权重",
+      "retention": "永久受管数据，不作临时缓存清理"
+    },
+    {
+      "path": "<data>/training/uploads/<uuid>/source.<ext>",
+      "owners": [
+        "be-api",
+        "be-training"
+      ],
+      "purpose": "训练录播原片",
+      "retention": "样本移除仍保留原片，已有快照可能引用"
+    },
+    {
+      "path": "<data>/training/previews/<sample-id>.mp4",
+      "owners": [
+        "be-api",
+        "be-media"
+      ],
+      "purpose": "训练标注用兼容预览",
+      "retention": "仍有样本引用或正在生成时保护"
+    },
+    {
+      "path": "<data>/training/jobs/<id>/",
+      "owners": [
+        "be-training",
+        "be-training-worker"
+      ],
+      "purpose": "snapshot、manifest、features/*.npy、progress、log、runs/model/best.pt",
+      "retention": "结束任务的npy特征可回收；检查点、快照与日志保留"
+    },
+    {
+      "path": "<data>/.service.lock",
+      "owners": [
+        "be-execution"
+      ],
+      "purpose": "工作目录独占锁",
+      "retention": "锁随服务释放，文件本身不是任务队列或PID表"
+    },
+    {
+      "path": "server-accounts.json / SONGCUT_USERS_JSON / SONGCUT_USERS_FILE",
+      "owners": [
+        "be-access"
+      ],
+      "purpose": "服务端配置式命名账户",
+      "retention": "部署配置，非项目SQLite用户表；不提交实际凭据"
+    }
+  ],
+  "future": [
+    {
+      "title": "自动歌名与原唱识别",
+      "status": "contract-only",
+      "node": "be-ports",
+      "symbols": [
+        "SongIdentifier",
+        "SongCandidate"
+      ],
+      "evidence": [
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "SongIdentifier",
+          "line": 11
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "_create_app.capabilities",
+          "line": 282
+        }
+      ],
+      "missing": "参考库/指纹匹配适配器、任务与结果确认流程。当前歌曲名称手动填写，detector只生成待识别片段。"
+    },
+    {
+      "title": "歌词自动搜索与逐字对齐",
+      "status": "contract-only",
+      "node": "be-ports",
+      "symbols": [
+        "LyricsProvider",
+        "LyricsAligner"
+      ],
+      "evidence": [
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "LyricsProvider",
+          "line": 15
+        },
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "LyricsAligner",
+          "line": 19
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "_create_app.capabilities",
+          "line": 282
+        }
+      ],
+      "missing": "歌词来源适配器和对齐引擎；目前只有LRC导入与已有时间戳的ASS输出。"
+    },
+    {
+      "title": "AI封面和AI标题",
+      "status": "contract-only",
+      "node": "be-ports",
+      "symbols": [
+        "CoverGenerator",
+        "TitleGenerator"
+      ],
+      "evidence": [
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "CoverGenerator",
+          "line": 27
+        },
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "TitleGenerator",
+          "line": 31
+        }
+      ],
+      "missing": "实际模型/服务适配器、用户选择与生成任务。"
+    },
+    {
+      "title": "自动上传B站或音乐播放器",
+      "status": "contract-only",
+      "node": "be-ports",
+      "symbols": [
+        "Publisher"
+      ],
+      "evidence": [
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "Publisher",
+          "line": 35
+        }
+      ],
+      "missing": "发布实现、凭据与目标平台状态/重试。B站录制接入不能等同于B站上传。"
+    },
+    {
+      "title": "分布式计算/远程Mac执行节点",
+      "status": "planned-not-implemented",
+      "node": "be-jobs",
+      "evidence": [
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner",
+          "line": 10
+        },
+        {
+          "path": "services/studio/studio/workspace_lease.py",
+          "symbol": "WorkspaceLease",
+          "line": 6
+        }
+      ],
+      "missing": "远程任务协议、节点租约和共享存储；当前强制每数据目录单API实例。"
+    }
+  ],
+  "recommendations": [
+    {
+      "id": "split-http-composition",
+      "priority": "P1",
+      "title": "将HTTP路由与服务组装拆开",
+      "current": "api.py 646行；_create_app包含大量嵌套路由、权限整形和业务回调。录制模块已单独使用APIRouter，可作为拆分模板。",
+      "proposal": "保留一个composition root创建依赖，按项目、模型、训练、媒体、缓存分组路由；将make_project/clone等应用用例移入明确服务。",
+      "status": "proposal",
+      "evidence": [
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "_create_app",
+          "line": 101
+        },
+        {
+          "path": "services/studio/studio/recording_api.py",
+          "symbol": "recording_router",
+          "line": 23
+        }
+      ]
+    },
+    {
+      "id": "repositories",
+      "priority": "P1",
+      "title": "收敛数据库访问入口",
+      "current": "Store包装项目和Job，但ModelLibrary、TrainingService、RecorderService、RuntimeCache仍直接执行SQL。",
+      "proposal": "按聚合提供ProjectRepository、JobRepository、TrainingRepository、RecordingRepository、ModelRepository；事务边界仍在Python，避免把权限或存储实现搬到UI。",
+      "status": "proposal",
+      "evidence": [
+        {
+          "path": "services/studio/studio/store.py",
+          "symbol": "Store",
+          "line": 12
+        },
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "TrainingService",
+          "line": 111
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderService",
+          "line": 151
+        },
+        {
+          "path": "services/studio/studio/model_library.py",
+          "symbol": "ModelLibrary",
+          "line": 43
+        }
+      ]
+    },
+    {
+      "id": "typed-tasks",
+      "priority": "P1",
+      "title": "为持久任务定义带版本的类型",
+      "current": "Job.task是dict，Studio注册字符串kind和处理器；训练样本/任务也大量使用dict。",
+      "proposal": "定义PreviewTask、DetectionTask、ExportTask等版本化描述，恢复前显式验证；分清媒体Job与TrainingJob，不把两套状态混为一个万能类。",
+      "status": "proposal",
+      "evidence": [
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "Job",
+          "line": 130
+        },
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "Studio",
+          "line": 30
+        },
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner.restore",
+          "line": 35
+        }
+      ]
+    },
+    {
+      "id": "queue-inspection",
+      "priority": "P2",
+      "title": "让后台维护通过公共队列接口工作",
+      "current": "PreviewMaintenance直接访问runner._jobs、lock、policy。",
+      "proposal": "暴露QueueSnapshot/可用容量查询与trySubmitBackground，隐藏队列容器，复用同一个预算规则。",
+      "status": "proposal",
+      "evidence": [
+        {
+          "path": "services/studio/studio/media_maintenance.py",
+          "symbol": "PreviewMaintenance.sweep",
+          "line": 13
+        },
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner.submit",
+          "line": 57
+        }
+      ]
+    },
+    {
+      "id": "ports-injection",
+      "priority": "P2",
+      "title": "把实际适配器与已有协议对齐",
+      "current": "有ports.py，但Studio媒体依赖具体FFmpegMedia；SongIdentifier等接口没有实现，不能当成已可切换的插件。",
+      "proposal": "已有功能先按结构协议注入并覆盖契约测试；新增识歌/歌词/发布功能再加入真实适配器和任务，不先扩展空的“全能插件层”。",
+      "status": "proposal",
+      "evidence": [
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "ClipRenderer",
+          "line": 23
+        },
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "Studio.__init__",
+          "line": 31
+        }
+      ]
+    },
+    {
+      "id": "keep-pure-functions",
+      "priority": "P2",
+      "title": "状态与生命周期用类，确定性转换保留函数",
+      "current": "Store/ModelLibrary/JobRunner/RecorderService已用类管理资源；歌词转换、训练验证、窗口切分等是独立函数。",
+      "proposal": "复用这些纯函数；需要持有状态、外部依赖、取消/订阅生命周期时再建服务类。UI只调应用用例，无需把Python计算重写成TS。",
+      "status": "proposal",
+      "evidence": [
+        {
+          "path": "services/studio/studio/adapters/lyrics.py",
+          "symbol": "parse_lrc",
+          "line": 8
+        },
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "validate_training_dataset",
+          "line": 76
+        },
+        {
+          "path": "services/studio/studio/inference_worker.py",
+          "symbol": "pcm_windows",
+          "line": 57
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "symbol": "health",
+      "file": "services/studio/studio/api.py",
+      "line": 273
+    },
+    {
+      "method": "GET",
+      "path": "/api/session",
+      "symbol": "session",
+      "file": "services/studio/studio/api.py",
+      "line": 277
+    },
+    {
+      "method": "GET",
+      "path": "/api/capabilities",
+      "symbol": "capabilities",
+      "file": "services/studio/studio/api.py",
+      "line": 282
+    },
+    {
+      "method": "GET",
+      "path": "/api/cache",
+      "symbol": "cache_status",
+      "file": "services/studio/studio/api.py",
+      "line": 290
+    },
+    {
+      "method": "POST",
+      "path": "/api/cache/clean",
+      "symbol": "clean_cache",
+      "file": "services/studio/studio/api.py",
+      "line": 294
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "symbol": "projects",
+      "file": "services/studio/studio/api.py",
+      "line": 298
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/upload",
+      "symbol": "upload",
+      "file": "services/studio/studio/api.py",
+      "line": 302
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{ident}",
+      "symbol": "project",
+      "file": "services/studio/studio/api.py",
+      "line": 325
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{ident}/clone",
+      "symbol": "clone_project",
+      "file": "services/studio/studio/api.py",
+      "line": 329
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/{ident}",
+      "symbol": "save",
+      "file": "services/studio/studio/api.py",
+      "line": 339
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{ident}/detect",
+      "symbol": "detect",
+      "file": "services/studio/studio/api.py",
+      "line": 351
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{ident}/preview",
+      "symbol": "preview",
+      "file": "services/studio/studio/api.py",
+      "line": 365
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{ident}/clips/{clip_id}/export",
+      "symbol": "export",
+      "file": "services/studio/studio/api.py",
+      "line": 371
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{ident}/clips/{clip_id}/lyrics",
+      "symbol": "lyrics",
+      "file": "services/studio/studio/api.py",
+      "line": 377
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{ident}/media",
+      "symbol": "source_media",
+      "file": "services/studio/studio/api.py",
+      "line": 382
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs",
+      "symbol": "jobs",
+      "file": "services/studio/studio/api.py",
+      "line": 401
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/{job_id}/cancel",
+      "symbol": "cancel_job",
+      "file": "services/studio/studio/api.py",
+      "line": 439
+    },
+    {
+      "method": "GET",
+      "path": "/api/artifacts/{job_id}/{filename}",
+      "symbol": "artifact",
+      "file": "services/studio/studio/api.py",
+      "line": 446
+    },
+    {
+      "method": "GET",
+      "path": "/api/models",
+      "symbol": "models",
+      "file": "services/studio/studio/api.py",
+      "line": 458
+    },
+    {
+      "method": "POST",
+      "path": "/api/models/upload",
+      "symbol": "import_model",
+      "file": "services/studio/studio/api.py",
+      "line": 469
+    },
+    {
+      "method": "GET",
+      "path": "/api/models/{model_id}/download",
+      "symbol": "download_model",
+      "file": "services/studio/studio/api.py",
+      "line": 490
+    },
+    {
+      "method": "GET",
+      "path": "/api/training/datasets",
+      "symbol": "datasets",
+      "file": "services/studio/studio/api.py",
+      "line": 500
+    },
+    {
+      "method": "POST",
+      "path": "/api/training/datasets",
+      "symbol": "create_dataset",
+      "file": "services/studio/studio/api.py",
+      "line": 504
+    },
+    {
+      "method": "GET",
+      "path": "/api/training/datasets/{dataset_id}",
+      "symbol": "dataset",
+      "file": "services/studio/studio/api.py",
+      "line": 508
+    },
+    {
+      "method": "POST",
+      "path": "/api/training/datasets/{dataset_id}/samples",
+      "symbol": "add_sample",
+      "file": "services/studio/studio/api.py",
+      "line": 512
+    },
+    {
+      "method": "PUT",
+      "path": "/api/training/datasets/{dataset_id}/samples/{sample_id}",
+      "symbol": "update_sample",
+      "file": "services/studio/studio/api.py",
+      "line": 532
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/training/datasets/{dataset_id}/samples/{sample_id}",
+      "symbol": "remove_sample",
+      "file": "services/studio/studio/api.py",
+      "line": 536
+    },
+    {
+      "method": "GET",
+      "path": "/api/training/datasets/{dataset_id}/samples/{sample_id}/media",
+      "symbol": "training_media",
+      "file": "services/studio/studio/api.py",
+      "line": 540
+    },
+    {
+      "method": "POST",
+      "path": "/api/training/datasets/{dataset_id}/samples/{sample_id}/preview",
+      "symbol": "training_preview",
+      "file": "services/studio/studio/api.py",
+      "line": 548
+    },
+    {
+      "method": "POST",
+      "path": "/api/training/datasets/{dataset_id}/train",
+      "symbol": "start_training",
+      "file": "services/studio/studio/api.py",
+      "line": 578
+    },
+    {
+      "method": "GET",
+      "path": "/api/training/jobs",
+      "symbol": "training_jobs",
+      "file": "services/studio/studio/api.py",
+      "line": 589
+    },
+    {
+      "method": "GET",
+      "path": "/api/training/jobs/{job_id}",
+      "symbol": "training_job",
+      "file": "services/studio/studio/api.py",
+      "line": 593
+    },
+    {
+      "method": "POST",
+      "path": "/api/training/jobs/{job_id}/cancel",
+      "symbol": "cancel_training",
+      "file": "services/studio/studio/api.py",
+      "line": 597
+    },
+    {
+      "method": "GET",
+      "path": "/help/faq.md",
+      "symbol": "faq_markdown",
+      "file": "services/studio/studio/api.py",
+      "line": 601
+    },
+    {
+      "method": "GET",
+      "path": "/help/faq",
+      "symbol": "faq",
+      "file": "services/studio/studio/api.py",
+      "line": 619
+    },
+    {
+      "method": "GET",
+      "path": "/help/recording",
+      "symbol": "recording_help",
+      "file": "services/studio/studio/api.py",
+      "line": 623
+    },
+    {
+      "method": "GET",
+      "path": "/help/models",
+      "symbol": "model_help",
+      "file": "services/studio/studio/api.py",
+      "line": 627
+    },
+    {
+      "method": "GET",
+      "path": "/api/recorder/status",
+      "symbol": "status",
+      "file": "services/studio/studio/recording_api.py",
+      "line": 32
+    },
+    {
+      "method": "GET",
+      "path": "/api/recorder/rooms",
+      "symbol": "rooms",
+      "file": "services/studio/studio/recording_api.py",
+      "line": 35
+    },
+    {
+      "method": "POST",
+      "path": "/api/recorder/rooms",
+      "symbol": "add",
+      "file": "services/studio/studio/recording_api.py",
+      "line": 38
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/recorder/rooms/{room_id}",
+      "symbol": "configure",
+      "file": "services/studio/studio/recording_api.py",
+      "line": 44
+    },
+    {
+      "method": "POST",
+      "path": "/api/recorder/rooms/{room_id}/{action}",
+      "symbol": "action",
+      "file": "services/studio/studio/recording_api.py",
+      "line": 51
+    },
+    {
+      "method": "GET",
+      "path": "/api/recordings",
+      "symbol": "recordings",
+      "file": "services/studio/studio/recording_api.py",
+      "line": 58
+    },
+    {
+      "method": "POST",
+      "path": "/api/recordings/{ident}/retry",
+      "symbol": "retry",
+      "file": "services/studio/studio/recording_api.py",
+      "line": 61
+    },
+    {
+      "method": "POST",
+      "path": "/api/recorder/webhook",
+      "symbol": "webhook",
+      "file": "services/studio/studio/recording_api.py",
+      "line": 64
+    }
+  ],
+  "stats": {
+    "pythonFiles": 29,
+    "pythonLines": 4071,
+    "apiLines": 646,
+    "apiRouteCount": 45
+  },
+  "externals": [
+    {
+      "id": "external-recorder",
+      "name": "BililiveRecorder 2.20.0",
+      "boundary": "独立进程/容器，REST控制与Webhook通知",
+      "refs": [
+        "deploy/compose.recorder.yaml",
+        "docs/RECORDING.md"
+      ]
+    },
+    {
+      "id": "external-ffmpeg",
+      "name": "FFmpeg / FFprobe",
+      "boundary": "媒体处理子进程",
+      "refs": [
+        "services/studio/studio/adapters/media.py"
+      ]
+    },
+    {
+      "id": "external-autoslicer",
+      "name": "AutoSlicer-v2",
+      "boundary": "固定上游源码与兼容补丁；模型/LogMel/后处理/训练入口",
+      "refs": [
+        "packages/contracts/model-source.json",
+        "patches/0001-apple-silicon.patch"
+      ]
+    },
+    {
+      "id": "external-sqlite",
+      "name": "SQLite",
+      "boundary": "单工作目录WAL数据库文件",
+      "refs": [
+        "services/studio/studio/store.py"
+      ]
+    }
+  ],
+  "caveats": [
+    "此图描述333104d当前源码，不是说所有规划已完成。",
+    "仅审计源码；本轮不运行训练/转码、不改变仓库、不进行Linux性能或真实B站录制验证。",
+    "API权限由主middleware和具体项目授权共同实施，录制webhook有独立密钥边界。"
+  ]
+}

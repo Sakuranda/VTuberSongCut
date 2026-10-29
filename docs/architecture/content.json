@@ -1,0 +1,5036 @@
+{
+  "storageCatalog": [
+    {
+      "location": "<data>/studio.sqlite3",
+      "content": "项目/任务/模型/训练/录播记录共用SQLite文件",
+      "owner": "SQLite 项目与任务存储 / 训练应用服务 TrainingService / 模型库 ModelLibrary / 录播姬适配与持久导入",
+      "retention": "持久保留；项目和数据集通过revision防冲突",
+      "tables": [
+        "projects → Store",
+        "jobs → Store",
+        "models → ModelLibrary",
+        "training_datasets → TrainingService",
+        "training_jobs → TrainingService",
+        "recordings → RecorderService",
+        "recorder_events → RecorderService",
+        "recorder_state → RecorderService"
+      ]
+    },
+    {
+      "location": "<data>/media/<uuid>/source.<ext>",
+      "content": "上传的源视频/音频",
+      "owner": "HTTP 入口与服务组装",
+      "retention": "原片保留；上传失败删除该次未完成目录",
+      "tables": []
+    },
+    {
+      "location": "<recorder-root>/<relative-file>",
+      "content": "录播姬写入的原始分段，拾歌只读引用",
+      "owner": "BililiveRecorder 2.20.0",
+      "retention": "拾歌不删除源录播；必须使用唯一归档文件名",
+      "tables": []
+    },
+    {
+      "location": "<data>/previews/<source-signature>-<profile>.mp4",
+      "content": "所有个人副本共用的低/高预览",
+      "owner": "切歌应用服务 Studio / 媒体适配器 FFmpegMedia",
+      "retention": "项目或活动任务引用时保留；可再生孤立缓存可回收",
+      "tables": []
+    },
+    {
+      "location": "<data>/detections/<key>.json",
+      "content": "按源身份、模型和推理参数复用演唱区间",
+      "owner": "切歌应用服务 Studio",
+      "retention": "非活动任务缓存可回收；已保存Project.clips不受影响",
+      "tables": []
+    },
+    {
+      "location": "<data>/jobs/<job-id>/",
+      "content": "检测日志/概率/segments.json，或导出MP4/MP3/ASS/项目快照",
+      "owner": "切歌应用服务 Studio / 演唱检测适配器 / 媒体适配器 FFmpegMedia",
+      "retention": "概率和旧预览等指定缓存可回收；导出成品、日志和快照保留",
+      "tables": []
+    },
+    {
+      "location": "<data>/models/managed/<sha256>.pt",
+      "content": "验证后登记的模型权重",
+      "owner": "模型库 ModelLibrary",
+      "retention": "永久受管数据，不作临时缓存清理",
+      "tables": []
+    },
+    {
+      "location": "<data>/training/uploads/<uuid>/source.<ext>",
+      "content": "训练录播原片",
+      "owner": "HTTP 入口与服务组装 / 训练应用服务 TrainingService",
+      "retention": "样本移除仍保留原片，已有快照可能引用",
+      "tables": []
+    },
+    {
+      "location": "<data>/training/previews/<sample-id>.mp4",
+      "content": "训练标注用兼容预览",
+      "owner": "HTTP 入口与服务组装 / 媒体适配器 FFmpegMedia",
+      "retention": "仍有样本引用或正在生成时保护",
+      "tables": []
+    },
+    {
+      "location": "<data>/training/jobs/<id>/",
+      "content": "snapshot、manifest、features/*.npy、progress、log、runs/model/best.pt",
+      "owner": "训练应用服务 TrainingService / 训练数据准备与上游训练",
+      "retention": "结束任务的npy特征可回收；检查点、快照与日志保留",
+      "tables": []
+    },
+    {
+      "location": "<data>/.service.lock",
+      "content": "工作目录独占锁",
+      "owner": "任务取消、进程树与工作目录锁",
+      "retention": "锁随服务释放，文件本身不是任务队列或PID表",
+      "tables": []
+    },
+    {
+      "location": "server-accounts.json / SONGCUT_USERS_JSON / SONGCUT_USERS_FILE",
+      "content": "服务端配置式命名账户",
+      "owner": "身份、角色与服务入口策略",
+      "retention": "部署配置，非项目SQLite用户表；不提交实际凭据",
+      "tables": []
+    }
+  ],
+  "nodes": [
+    {
+      "id": "fe-app",
+      "title": "应用入口与工作区装配",
+      "layer": "ui",
+      "status": "implemented",
+      "summary": "React入口，装配切歌、训练/模型管理、录播库以及全局外观/缓存对话框。",
+      "responsibilities": [
+        "默认切歌工作区",
+        "按能力切换训练或模型管理",
+        "视图权限提示与只读交互",
+        "组合全站UI组件"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "App",
+          "line": 122
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "createRoot",
+          "line": 1926
+        }
+      ],
+      "risks": [
+        "App仍同时承担大量流程编排，当前不是一个仅渲染的薄UI。",
+        "前端实际为React19.1+TypeScript5.8/Vite6.3；没有Vue运行依赖。"
+      ],
+      "tech": "React / TSX"
+    },
+    {
+      "id": "fe-project-flow",
+      "title": "项目、草稿与播放编排（内嵌App）",
+      "layer": "ts",
+      "status": "implemented",
+      "summary": "持有编辑草稿、已保存快照、选择、媒体位置、任务和权限状态，协调API与UI。",
+      "responsibilities": [
+        "导入、读取、克隆与保存项目",
+        "409冲突提示且保留草稿",
+        "延迟响应隔离",
+        "默认低清与按需高清",
+        "任务完成后刷新数据而不覆盖脏草稿",
+        "提交检测、预览、导出与取消",
+        "LRC导入和歌词样式草稿"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "accept",
+          "line": 279
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "load",
+          "line": 292
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "requestPreview",
+          "line": 332
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "save",
+          "line": 613
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "importVideo",
+          "line": 640
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "run",
+          "line": 693
+        }
+      ],
+      "risks": [
+        "这是main.tsx中的逻辑区域，不是已经拆出的独立模块。",
+        "页面内的canEdit/canManage是交互限制，真正授权仍由Python服务端执行。",
+        "src/frame-rate时间轴规则、DOM事件、异步流程与JSX仍在同一组件中。"
+      ],
+      "tech": "TypeScript"
+    },
+    {
+      "id": "fe-types",
+      "title": "共享前端类型（目前混在api.ts）",
+      "layer": "ts",
+      "status": "implemented",
+      "summary": "定义项目、片段、训练、模型、录播、能力与缓存的TypeScript传输类型。",
+      "responsibilities": [
+        "编辑模型字段",
+        "任务与训练状态",
+        "角色/低配能力字段",
+        "低清/高清状态",
+        "录播房间及归档记录"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "Project",
+          "line": 112
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "Job",
+          "line": 137
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "TrainingDataset",
+          "line": 74
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "RecorderStatus",
+          "line": 169
+        }
+      ],
+      "risks": [
+        "22个interface声明，其中包括网络内部类型；多处业务函数以import type依赖api.ts。",
+        "TS类型本身不会验证运行时JSON；服务端Pydantic约束与请求响应形状是另一个边界。"
+      ],
+      "tech": "TypeScript"
+    },
+    {
+      "id": "fe-api",
+      "title": "HTTP、会话与上传客户端",
+      "layer": "ts",
+      "status": "implemented",
+      "summary": "集中封装HTTP调用、会话token更新、XHR上传进度和36个业务接口/URL方法。",
+      "responsibilities": [
+        "精确会话失效403才重试一次",
+        "并发会话刷新合并",
+        "AbortSignal中止",
+        "上传字节进度与服务端处理阶段",
+        "普通403/网络不确定错误不盲目重放",
+        "构造媒体/产物下载地址"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "ApiError",
+          "line": 214
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "getSession",
+          "line": 243
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "request",
+          "line": 305
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "sendUpload",
+          "line": 360
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "uploadForm",
+          "line": 439
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "api",
+          "line": 500
+        }
+      ],
+      "risks": [
+        "目前是模块级单例session和api对象，唯一显式前端类是ApiError。",
+        "同一个文件混合类型、传输、鉴权生命周期、上传器与业务端点。"
+      ],
+      "tech": "TypeScript"
+    },
+    {
+      "id": "fe-editing",
+      "title": "时间码与项目校验",
+      "layer": "ts",
+      "status": "implemented",
+      "summary": "可复用纯计算规则：缺省配置、时间码、帧网格和客户端表单校验。",
+      "responsibilities": [
+        "旧项目补齐默认字段",
+        "毫秒和HH:MM:SS.mmm转换",
+        "29.97等帧率步进避免累积舍入",
+        "检查边界/字幕/输出参数"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/editing.ts",
+          "symbol": "normalizeProject",
+          "line": 15
+        },
+        {
+          "path": "apps/web/src/editing.ts",
+          "symbol": "formatTimecode",
+          "line": 27
+        },
+        {
+          "path": "apps/web/src/editing.ts",
+          "symbol": "parseTimecode",
+          "line": 31
+        },
+        {
+          "path": "apps/web/src/editing.ts",
+          "symbol": "snapToFrame / stepFrames",
+          "line": 46
+        },
+        {
+          "path": "apps/web/src/editing.ts",
+          "symbol": "validateProject",
+          "line": 57
+        }
+      ],
+      "risks": [
+        "适合继续保持纯函数，不必为了多用类把无状态计算包装为实例。",
+        "部分低配/快速导出规则仍在App或ExportControls中，服务端还有权威校验。"
+      ],
+      "tech": "TypeScript"
+    },
+    {
+      "id": "fe-playback",
+      "title": "预览状态与元数据合并",
+      "layer": "ts",
+      "status": "implemented",
+      "summary": "识别low320-v1是否真正就绪，合并预览元数据而不覆盖草稿。",
+      "responsibilities": [
+        "旧高码率兼容文件不冒充320p",
+        "音频无需视频代理即可播放",
+        "高低清独立就绪条件",
+        "后台预览更新保留编辑、版本和权限"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/playback.ts",
+          "symbol": "previewReady",
+          "line": 3
+        },
+        {
+          "path": "apps/web/src/playback.ts",
+          "symbol": "mergePreviewMetadata",
+          "line": 14
+        }
+      ],
+      "risks": [],
+      "tech": "TypeScript"
+    },
+    {
+      "id": "fe-polling",
+      "title": "可见性轮询与React桥接",
+      "layer": "ts",
+      "status": "implemented",
+      "summary": "单请求串行轮询，引入页面可见性与取消机制；React hook只连接生命周期。",
+      "responsibilities": [
+        "隐藏标签暂停并中止读取",
+        "返回前台立即检查",
+        "慢请求不重叠",
+        "停止任务后清理计时器",
+        "多个工作区复用同一策略"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/polling.ts",
+          "symbol": "startVisiblePolling",
+          "line": 2
+        },
+        {
+          "path": "apps/web/src/usePolling.ts",
+          "symbol": "usePolling",
+          "line": 4
+        }
+      ],
+      "risks": [
+        "polling.ts已与React hook拆开，是可复用的现有分层样例。",
+        "底层默认使用document，但允许注入visibility/schedule/cancel。"
+      ],
+      "tech": "TypeScript"
+    },
+    {
+      "id": "fe-timeline",
+      "title": "切歌时间轴与边界手柄",
+      "layer": "ui",
+      "status": "implemented",
+      "summary": "将指针位置和键盘动作转换为时间，再通过回调通知项目编排层。",
+      "responsibilities": [
+        "点击定位",
+        "拖动入点/出点",
+        "方向键逐帧及Shift十帧",
+        "最小边界间隔",
+        "可访问的滑块与控件"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/Timeline.tsx",
+          "symbol": "Timeline",
+          "line": 16
+        },
+        {
+          "path": "apps/web/src/Timeline.tsx",
+          "symbol": "pointerTime",
+          "line": 28
+        },
+        {
+          "path": "apps/web/src/Timeline.tsx",
+          "symbol": "changeBoundary",
+          "line": 38
+        },
+        {
+          "path": "apps/web/src/Timeline.tsx",
+          "symbol": "handleKey",
+          "line": 49
+        }
+      ],
+      "risks": [
+        "无HTTP调用；几何映射属于UI适配，但边界规则与App.boundary存在重复。"
+      ],
+      "tech": "React / TSX"
+    },
+    {
+      "id": "fe-timecode",
+      "title": "可复用时间码输入",
+      "layer": "ui",
+      "status": "implemented",
+      "summary": "封装输入文本、焦点、范围错误与值变更通知。",
+      "responsibilities": [
+        "切歌与训练共用",
+        "格式与有效范围提示",
+        "Enter确认、Escape还原",
+        "输入期间避免外部状态干扰"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/TimecodeInput.tsx",
+          "symbol": "TimecodeInput",
+          "line": 13
+        },
+        {
+          "path": "apps/web/src/TimecodeInput.tsx",
+          "symbol": "edit",
+          "line": 34
+        }
+      ],
+      "risks": [],
+      "tech": "React / TSX"
+    },
+    {
+      "id": "fe-export-controls",
+      "title": "导出参数表单",
+      "layer": "ui",
+      "status": "implemented",
+      "summary": "由父级传入当前ExportSettings和onChange，只渲染输出选项及即时规则。",
+      "responsibilities": [
+        "MP4/MP3选择",
+        "精确/快速模式",
+        "编码、分辨率、帧率、画质/码率",
+        "低配规格禁用提示",
+        "快速导出时保留原规格"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/ExportControls.tsx",
+          "symbol": "ExportControls",
+          "line": 13
+        }
+      ],
+      "risks": [
+        "无本地useState或HTTP调用；是薄表单，但模式切换约束也可移入TS导出策略纯函数。"
+      ],
+      "tech": "React / TSX"
+    },
+    {
+      "id": "fe-training",
+      "title": "训练工作区与准备度校验",
+      "layer": "ui",
+      "status": "implemented",
+      "summary": "管理数据集、选中素材、未保存标注、训练参数、训练任务与模型刷新。",
+      "responsibilities": [
+        "创建训练项目",
+        "上传样本与实际进度",
+        "训练/验证集独立性预检查",
+        "保存/删除标注素材",
+        "启动和取消训练",
+        "训练完成刷新模型库"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/TrainingWorkspace.tsx",
+          "symbol": "trainingReadiness",
+          "line": 44
+        },
+        {
+          "path": "apps/web/src/TrainingWorkspace.tsx",
+          "symbol": "TrainingWorkspace",
+          "line": 88
+        },
+        {
+          "path": "apps/web/src/TrainingWorkspace.tsx",
+          "symbol": "importSample",
+          "line": 280
+        }
+      ],
+      "risks": [
+        "训练准备度与参数范围规则仍在TSX中。",
+        "重型训练在Python后台；该页面只提交配置与展示进度。",
+        "服务端低配模式禁用训练时App改为模型管理界面。"
+      ],
+      "tech": "React / TSX"
+    },
+    {
+      "id": "fe-annotation",
+      "title": "训练视频标注器",
+      "layer": "ui",
+      "status": "implemented",
+      "summary": "将视频预览、目标/其他演唱区间标注与兼容预览任务整合为训练子视图。",
+      "responsibilities": [
+        "拖动区间与时间戳编辑",
+        "Space/K播放、I/O标记、A添加",
+        "禁止重叠标注",
+        "改动后取消完整复核状态",
+        "恢复预览任务并显示实际进度"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/TrainingAnnotation.tsx",
+          "symbol": "TrainingAnnotation",
+          "line": 14
+        },
+        {
+          "path": "apps/web/src/TrainingAnnotation.tsx",
+          "symbol": "generatePreview",
+          "line": 87
+        },
+        {
+          "path": "apps/web/src/TrainingAnnotation.tsx",
+          "symbol": "addRegion",
+          "line": 112
+        },
+        {
+          "path": "apps/web/src/TrainingAnnotation.tsx",
+          "symbol": "shortcuts",
+          "line": 147
+        }
+      ],
+      "risks": [
+        "使用的是训练兼容预览接口，不能与切歌320p/高清代理流程混为一谈。",
+        "视频DOM、快捷键适配、标注领域规则和任务流程仍混在一起。"
+      ],
+      "tech": "React / TSX"
+    },
+    {
+      "id": "fe-models",
+      "title": "模型选择与导入",
+      "layer": "ui",
+      "status": "implemented",
+      "summary": "选择主播模型与运行设备，展示模型库及帮助，并上传兼容模型。",
+      "responsibilities": [
+        "模型与设备显式选择",
+        "帮助跳转训练/模型管理",
+        "文件名和自定义名称",
+        "导入后刷新模型库",
+        "模型下载/使用入口"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/ModelControls.tsx",
+          "symbol": "ModelSelector",
+          "line": 6
+        },
+        {
+          "path": "apps/web/src/ModelControls.tsx",
+          "symbol": "ModelManager",
+          "line": 201
+        },
+        {
+          "path": "apps/web/src/ModelControls.tsx",
+          "symbol": "importModel",
+          "line": 216
+        }
+      ],
+      "risks": [
+        "ModelSelector主要是props回调；ModelManager直接调用api.uploadModel并管理异步状态。"
+      ],
+      "tech": "React / TSX"
+    },
+    {
+      "id": "fe-recordings",
+      "title": "录播库与录制控制",
+      "layer": "ui",
+      "status": "implemented",
+      "summary": "展示归档录播；管理员读取录制器状态并控制房间。",
+      "responsibilities": [
+        "录播文件状态及打开/重试",
+        "管理员添加房间与自动录制开关",
+        "开始/停止录制",
+        "磁盘暂停告警",
+        "可见工作区10秒轮询"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/RecordingsWorkspace.tsx",
+          "symbol": "RecordingsWorkspace",
+          "line": 18
+        },
+        {
+          "path": "apps/web/src/RecordingsWorkspace.tsx",
+          "symbol": "act",
+          "line": 66
+        }
+      ],
+      "risks": [
+        "REST流程和loading/error状态在TSX中；不承载真实直播抓流或编码。",
+        "非管理员只取归档列表；打开项目通过App.onOpen回调。"
+      ],
+      "tech": "React / TSX"
+    },
+    {
+      "id": "fe-upload-feedback",
+      "title": "上传与任务进度视图",
+      "layer": "ui",
+      "status": "implemented",
+      "summary": "统一呈现字节上传、服务端处理、成功、失败和重试。",
+      "responsibilities": [
+        "切歌/训练复用进度UI",
+        "区分传输完成与处理完成",
+        "无总长度时不假造百分比",
+        "错误提示与重选/重试动作"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/UploadFeedback.tsx",
+          "symbol": "FileUploadState",
+          "line": 4
+        },
+        {
+          "path": "apps/web/src/UploadFeedback.tsx",
+          "symbol": "UploadFeedback",
+          "line": 19
+        },
+        {
+          "path": "apps/web/src/OperationProgress.tsx",
+          "symbol": "OperationProgress",
+          "line": 1
+        }
+      ],
+      "risks": [
+        "FileUploadState目前定义在UI文件中，被App/训练流程反向导入；建议移到应用层类型。"
+      ],
+      "tech": "React / TSX"
+    },
+    {
+      "id": "fe-theme",
+      "title": "外观状态与浏览器适配",
+      "layer": "ts",
+      "status": "implemented",
+      "summary": "校验并持久化皮肤/配色/明暗，监听系统模式与跨标签更新，向UI提供快照。",
+      "responsibilities": [
+        "本地存储偏好",
+        "四套配色与系统明暗",
+        "无效/受限存储安全回退",
+        "跨标签同步",
+        "修改root data属性以驱动CSS"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/theme.ts",
+          "symbol": "parseAppearance",
+          "line": 22
+        },
+        {
+          "path": "apps/web/src/theme.ts",
+          "symbol": "createAppearanceController",
+          "line": 55
+        },
+        {
+          "path": "apps/web/src/theme.ts",
+          "symbol": "useAppearance",
+          "line": 135
+        }
+      ],
+      "risks": [
+        "已有可注入环境的controller工厂，但与React hook/DOM应用逻辑同文件；适合拆成AppearanceStore和视图适配器。"
+      ],
+      "tech": "TypeScript"
+    },
+    {
+      "id": "fe-appearance",
+      "title": "外观设置对话框",
+      "layer": "ui",
+      "status": "implemented",
+      "summary": "呈现受控皮肤、配色与明暗选项，通过回调更新外观状态。",
+      "responsibilities": [
+        "原生dialog焦点管理",
+        "立即生效",
+        "恢复默认",
+        "Escape关闭",
+        "短窗口内容滚动与固定操作区"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/AppearanceSettings.tsx",
+          "symbol": "AppearanceSettings",
+          "line": 17
+        }
+      ],
+      "risks": [],
+      "tech": "React / TSX"
+    },
+    {
+      "id": "fe-cache",
+      "title": "缓存管理对话框",
+      "layer": "ui",
+      "status": "implemented",
+      "summary": "读取后端容量和清理结果，展示保护范围和失败反馈。",
+      "responsibilities": [
+        "分类容量",
+        "重新检查",
+        "一键清理",
+        "过期返回隔离",
+        "保留皮肤偏好"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/CacheSettings.tsx",
+          "symbol": "CacheSettings",
+          "line": 12
+        },
+        {
+          "path": "apps/web/src/CacheSettings.tsx",
+          "symbol": "clean",
+          "line": 56
+        }
+      ],
+      "risks": [
+        "真正扫描、引用保护、周期回收位于Python后端；本组件仅请求与反馈。",
+        "请求生命周期仍在TSX中，可抽为CacheController。"
+      ],
+      "tech": "React / TSX"
+    },
+    {
+      "id": "fe-welcome",
+      "title": "欢迎页与角色入口",
+      "layer": "ui",
+      "status": "implemented",
+      "summary": "首用状态与插画展示，调用父级导入录播/导入模型回调。",
+      "responsibilities": [
+        "猫娘/简洁欢迎状态",
+        "导入录播入口",
+        "导入已有模型入口",
+        "可复用头像"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/SkinWelcome.tsx",
+          "symbol": "SkinAvatar",
+          "line": 3
+        },
+        {
+          "path": "apps/web/src/SkinWelcome.tsx",
+          "symbol": "SkinWelcome",
+          "line": 11
+        }
+      ],
+      "risks": [],
+      "tech": "React / TSX"
+    },
+    {
+      "id": "fe-lyrics",
+      "title": "歌词导入、样式与预览（内嵌App）",
+      "layer": "ui",
+      "status": "implemented",
+      "summary": "接受LRC文件/文本、偏移和字幕样式；预览当前歌词行并将配置交给后端导出。",
+      "responsibilities": [
+        "LRC文件或粘贴文本导入",
+        "歌词偏移秒数换算为毫秒",
+        "单行/双行/KTV样式选择",
+        "字号、边距、颜色和高亮色",
+        "视频中当前歌词行预览"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "importLyrics",
+          "line": 762
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "lyric-preview JSX",
+          "line": 1249
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "LRC upload and subtitle settings JSX",
+          "line": 1626
+        }
+      ],
+      "risks": [
+        "此处还不是独立LyricsEditor组件。",
+        "浏览器显示行级歌词预览；最终字幕渲染由Python/FFmpeg完成。",
+        "当前没有自动搜歌名、抓取歌词或自动逐词对齐界面。"
+      ],
+      "tech": "React / TSX"
+    },
+    {
+      "id": "be-domain",
+      "title": "项目、片段与任务契约",
+      "layer": "core",
+      "status": "implemented",
+      "summary": "Pydantic 记录约束时间、字幕、导出参数、项目所有权和任务状态，是 API 与存储共同使用的数据形状。",
+      "responsibilities": [
+        "源录播绝对毫秒时间轴",
+        "片段/歌词范围校验",
+        "共享源录播与个人副本",
+        "快速/精确导出规格"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "Project",
+          "line": 97
+        },
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "Clip",
+          "line": 77
+        },
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "Job",
+          "line": 130
+        },
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "ExportSettings",
+          "line": 58
+        },
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "LyricCue",
+          "line": 27
+        }
+      ],
+      "risks": [
+        "schema_version 当前为 1；训练记录和任务描述仍有 dict，并非全部已有强类型领域对象。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-ports",
+      "title": "扩展能力协议",
+      "layer": "core",
+      "status": "partial",
+      "summary": "声明检测、识歌、歌词、渲染、封面、标题和发布边界；只有部分边界已有实际适配器。",
+      "responsibilities": [
+        "检测器 Protocol",
+        "未来能力接口"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "SingingDetector",
+          "line": 7
+        },
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "ClipRenderer",
+          "line": 23
+        },
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "SongIdentifier",
+          "line": 11
+        },
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "LyricsAligner",
+          "line": 19
+        },
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "Publisher",
+          "line": 35
+        }
+      ],
+      "risks": [
+        "这不是已经实现的动态插件系统。SongIdentifier、LyricsProvider、LyricsAligner、CoverGenerator、TitleGenerator、Publisher 只有协议。Studio 的渲染依赖目前仍直接标注 FFmpegMedia。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-api",
+      "title": "HTTP 入口与服务组装",
+      "layer": "api",
+      "status": "implemented",
+      "summary": "create_app 先取得工作目录锁，再创建各服务；_create_app 同时承担 HTTP 路由、鉴权、响应整形、生命周期和录播导入回调。",
+      "responsibilities": [
+        "项目与媒体 API",
+        "模型/训练 API",
+        "服务启动与关闭",
+        "账号会话令牌与访问控制"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "create_app",
+          "line": 80
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "_create_app",
+          "line": 101
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "_create_app.protect_service",
+          "line": 210
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "_create_app.lifespan",
+          "line": 178
+        }
+      ],
+      "risks": [
+        "646 行集中承担组装、路由与部分应用规则，是后续拆分的主要后端热点。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-studio",
+      "title": "切歌应用服务 Studio",
+      "layer": "core",
+      "status": "implemented",
+      "summary": "将检测、预览、导出与歌词导入组织成可排队的应用用例；保存输入快照、结果复用与编辑合并规则。",
+      "responsibilities": [
+        "检测结果追加且保留已有片段",
+        "共享低/高预览",
+        "按参数复用导出媒体",
+        "每个用户独立导出快照",
+        "LRC 导入"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "Studio",
+          "line": 30
+        },
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "Studio.detect",
+          "line": 60
+        },
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "Studio.preview",
+          "line": 103
+        },
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "Studio.export",
+          "line": 133
+        },
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "Studio._export",
+          "line": 152
+        },
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "source_signature",
+          "line": 17
+        }
+      ],
+      "risks": [
+        "source_signature 是路径、大小、mtime_ns 的签名，不是整份媒体内容 SHA。模型选项或原片变化时拒绝应用旧检测结果。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-jobs",
+      "title": "有界任务队列 JobRunner",
+      "layer": "core",
+      "status": "implemented",
+      "summary": "以一个工作线程执行媒体重任务；注册结构化处理器，按任务所有者切换、限制总量和每人数量，并持久化状态。",
+      "responsibilities": [
+        "排队、进度、取消、超时",
+        "相同活动请求去重",
+        "结构化任务恢复",
+        "每项目互斥"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner",
+          "line": 10
+        },
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner.submit",
+          "line": 57
+        },
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner.restore",
+          "line": 35
+        },
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner._worker",
+          "line": 77
+        },
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner.cancel",
+          "line": 113
+        }
+      ],
+      "risks": [
+        "训练另有 TrainingService 的线程池，不通过该队列。旧闭包任务不能重放；重启标为 interrupted。这里是单工作空间/单进程设计，不是分布式队列。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-store",
+      "title": "SQLite 项目与任务存储",
+      "layer": "runtime",
+      "status": "implemented",
+      "summary": "提供连接事务、项目/任务快照、乐观版本校验和缓存索引。",
+      "responsibilities": [
+        "SQLite WAL",
+        "修改冲突返回 409",
+        "媒体元数据更新不增加编辑 revision",
+        "任务与渲染缓存查找"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/store.py",
+          "symbol": "Store",
+          "line": 12
+        },
+        {
+          "path": "services/studio/studio/store.py",
+          "symbol": "Store.save",
+          "line": 48
+        },
+        {
+          "path": "services/studio/studio/store.py",
+          "symbol": "Store.update_media",
+          "line": 58
+        },
+        {
+          "path": "services/studio/studio/store.py",
+          "symbol": "Store.cached_job",
+          "line": 96
+        }
+      ],
+      "risks": [
+        "models、training_*、recordings 等表由各服务使用 Store.connect 直接管理；数据库访问尚未完全收敛到独立 Repository。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-media",
+      "title": "媒体适配器 FFmpegMedia",
+      "layer": "runtime",
+      "status": "implemented",
+      "summary": "包装 FFprobe 与 FFmpeg，处理素材探测、低/高预览、兼容封装、精确/快速裁切和字幕烧录。",
+      "responsibilities": [
+        "320p/24fps 省流预览",
+        "最高1080p/30fps 高清",
+        "H.264/AAC 兼容码流复制",
+        "MP4 与 MP3",
+        "真实 FFmpeg 处理进度"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/adapters/media.py",
+          "symbol": "FFmpegMedia",
+          "line": 24
+        },
+        {
+          "path": "services/studio/studio/adapters/media.py",
+          "symbol": "FFmpegMedia.metadata",
+          "line": 124
+        },
+        {
+          "path": "services/studio/studio/adapters/media.py",
+          "symbol": "FFmpegMedia.preview",
+          "line": 150
+        },
+        {
+          "path": "services/studio/studio/adapters/media.py",
+          "symbol": "FFmpegMedia._run_preview",
+          "line": 236
+        },
+        {
+          "path": "services/studio/studio/adapters/media.py",
+          "symbol": "FFmpegMedia.render",
+          "line": 288
+        }
+      ],
+      "risks": [
+        "快速导出受关键帧影响，不能保证逐帧切点；使用字幕、改变画质需精确导出。预览与导出读取源素材，导出不会改用320p文件。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-lyrics",
+      "title": "歌词解析与字幕渲染",
+      "layer": "core",
+      "status": "implemented",
+      "summary": "将已有 LRC 转为时间化歌词，再将片段歌词生成 ASS；单行、经典双行和 KTV 布局使用同一字幕数据。",
+      "responsibilities": [
+        "LRC 偏移与时间裁剪",
+        "三种 ASS 布局",
+        "字幕文本转义"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/adapters/lyrics.py",
+          "symbol": "parse_lrc",
+          "line": 8
+        },
+        {
+          "path": "services/studio/studio/adapters/lyrics.py",
+          "symbol": "render_ass",
+          "line": 55
+        },
+        {
+          "path": "services/studio/studio/adapters/lyrics.py",
+          "symbol": "escape_ass",
+          "line": 46
+        }
+      ],
+      "risks": [
+        "没有在线歌词搜索或自动逐字对齐。仅在已提供真实 words 时间时生成逐字高亮。纯转换函数可继续复用，不需要为每个函数造类。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-models",
+      "title": "模型库 ModelLibrary",
+      "layer": "core",
+      "status": "implemented",
+      "summary": "隔离模型校验、登记、查找和运行设备选择；以内容 SHA-256 去重，保存受管模型和元信息。",
+      "responsibilities": [
+        "兼容 .pt/.pth 导入",
+        "来源与架构元信息",
+        "校验值去重",
+        "CPU/MPS/CUDA 可用性探测"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/model_library.py",
+          "symbol": "ModelLibrary",
+          "line": 43
+        },
+        {
+          "path": "services/studio/studio/model_library.py",
+          "symbol": "ModelLibrary.register_file",
+          "line": 137
+        },
+        {
+          "path": "services/studio/studio/model_library.py",
+          "symbol": "ModelLibrary.resolve",
+          "line": 115
+        },
+        {
+          "path": "services/studio/studio/model_library.py",
+          "symbol": "ModelLibrary.runtime",
+          "line": 74
+        }
+      ],
+      "risks": [
+        "运行环境探测有进程内缓存。模型注册使用独立暂存副本，验证后原子移入 models/managed；不是声纹向量库。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-model-probe",
+      "title": "隔离模型验证进程",
+      "layer": "runtime",
+      "status": "implemented",
+      "summary": "在独立解释器中加载权重并实际跑一次小输入，验证模型格式、时间分辨率与有限数值。",
+      "responsibilities": [
+        "weights_only=True",
+        "先映射CPU",
+        "CRNN/TCN 兼容检查",
+        "80维mel与3.125fps约定"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/model_probe.py",
+          "symbol": "main",
+          "line": 8
+        }
+      ],
+      "risks": [
+        "只接受 AutoSlicer 完整检查点；RVC 等音色转换模型不属于这个接口。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-detector",
+      "title": "演唱检测适配器",
+      "layer": "runtime",
+      "status": "implemented",
+      "summary": "把统一 detect 调用转换为 AutoSlicer 子进程，再把 segments.json 转为项目 Clip。",
+      "responsibilities": [
+        "CPU/auto 路由到流式worker",
+        "显式GPU沿用原上游推理",
+        "检测区间映射到源毫秒时间"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/adapters/autoslicer.py",
+          "symbol": "AutoSlicerDetector",
+          "line": 11
+        },
+        {
+          "path": "services/studio/studio/adapters/autoslicer.py",
+          "symbol": "AutoSlicerDetector.detect",
+          "line": 17
+        }
+      ],
+      "risks": [
+        "输出默认“待识别歌曲”，不是自动识别歌名。上游调用与 HTTP/UI 隔离。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-inference",
+      "title": "CPU流式推理进程",
+      "layer": "runtime",
+      "status": "implemented",
+      "summary": "单次FFmpeg音频管道按窗口背压读取，复用上游LogMel、模型和后处理，仅低帧率概率序列随时长增长。",
+      "responsibilities": [
+        "16kHz单声道流式音频",
+        "CPU线程上限",
+        "窗口重叠拼接",
+        "区间和概率输出"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/inference_worker.py",
+          "symbol": "main",
+          "line": 163
+        },
+        {
+          "path": "services/studio/studio/inference_worker.py",
+          "symbol": "decoded_audio",
+          "line": 75
+        },
+        {
+          "path": "services/studio/studio/inference_worker.py",
+          "symbol": "pcm_windows",
+          "line": 57
+        },
+        {
+          "path": "services/studio/studio/inference_worker.py",
+          "symbol": "predict_stream",
+          "line": 114
+        },
+        {
+          "path": "services/studio/studio/inference_worker.py",
+          "symbol": "window_settings",
+          "line": 29
+        }
+      ],
+      "risks": [
+        "CRNN默认120秒/重叠30秒；TCN保留600秒上下文。auto若解析为GPU会委派上游原infer.py。性能与真实准确率需要目标机器和真实录播验证。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-training",
+      "title": "训练应用服务 TrainingService",
+      "layer": "core",
+      "status": "implemented",
+      "summary": "管理训练数据集、样本、标注和训练任务，校验训练/验证隔离并保存不可变任务快照。",
+      "responsibilities": [
+        "标注与版本冲突检查",
+        "训练/验证源文件哈希去重",
+        "独立训练任务、日志与进度",
+        "完成后登记模型",
+        "取消与记录进程清理"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "TrainingService",
+          "line": 111
+        },
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "validate_training_dataset",
+          "line": 76
+        },
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "TrainingService.start",
+          "line": 229
+        },
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "TrainingService._run",
+          "line": 288
+        },
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "TrainingService.cancel",
+          "line": 425
+        }
+      ],
+      "risks": [
+        "有独立单线程执行器及自有进程生命周期；不是 JobRunner 的任务类型。低配服务器由 API 禁止启动训练。训练状态/样本目前使用 dict。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-training-worker",
+      "title": "训练数据准备与上游训练",
+      "layer": "runtime",
+      "status": "implemented",
+      "summary": "读取训练快照，复核素材哈希，提取LogMel及帧标签，调用上游 train.py，再检查最终权重和指标。",
+      "responsibilities": [
+        "CPU准备特征",
+        "正/负标签对齐",
+        "写训练/验证manifest",
+        "原上游训练入口",
+        "有限值权重检查"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/training_worker.py",
+          "symbol": "main",
+          "line": 23
+        },
+        {
+          "path": "services/studio/studio/training_worker.py",
+          "symbol": "atomic_json",
+          "line": 17
+        }
+      ],
+      "risks": [
+        "网页训练流程固定CRNN、单输出二分类（目标演唱/其余）；导入模型可以是兼容TCN，但不代表UI已有TCN训练选项。准备特征仍是每份素材提取，不能把CPU推理的流式优化误标成训练也已流式。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-recorder",
+      "title": "录播姬适配与持久导入",
+      "layer": "core",
+      "status": "implemented",
+      "summary": "RecorderClient 控制外部录播姬；RecorderService 验证文件完成事件、去重、排队导入并监测录制盘空间。",
+      "responsibilities": [
+        "房间添加/自动录制/开始停止",
+        "FileClosed事件幂等",
+        "文件稳定性与路径检查",
+        "后台导入有界重试",
+        "磁盘不足暂停与告警",
+        "回调自动配置"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderClient",
+          "line": 64
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderService",
+          "line": 151
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderService.accept",
+          "line": 185
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderService.process_one",
+          "line": 303
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderService.guard_disk",
+          "line": 269
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderClient.configure_webhook",
+          "line": 122
+        }
+      ],
+      "risks": [
+        "实际拉流和写录播的是独立 BililiveRecorder，不是拾歌Python自行实现B站拉流。导入通过注入回调回到 api.py 创建共享Project；媒体计算再进入JobRunner。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-recorder-api",
+      "title": "录播HTTP路由",
+      "layer": "api",
+      "status": "implemented",
+      "summary": "独立 APIRouter 将管理界面操作与录制事件映射到 RecorderService/RecorderClient。",
+      "responsibilities": [
+        "连接状态与录播列表",
+        "房间管理API",
+        "导入失败重试",
+        "独立密钥验证Webhook"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/recording_api.py",
+          "symbol": "recording_router",
+          "line": 23
+        },
+        {
+          "path": "services/studio/studio/recording_api.py",
+          "symbol": "recording_router.webhook",
+          "line": 64
+        }
+      ],
+      "risks": [
+        "仅准确匹配的webhook POST路径不使用浏览器Basic/会话校验，路由仍独立验证token并拒绝Origin。事件体上限64KiB；其他录制管理操作由主API限制管理员。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-cache",
+      "title": "运行缓存回收 RuntimeCache",
+      "layer": "runtime",
+      "status": "implemented",
+      "summary": "根据项目引用和任务状态筛选可再生缓存；手工清理无年龄等待，自动任务按7天保留期每小时检查。",
+      "responsibilities": [
+        "分类容量与清理报告",
+        "保护原片/模型/导出/当前预览",
+        "活动任务保护",
+        "共享派生文件识别",
+        "失败文件继续保留"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/cache.py",
+          "symbol": "RuntimeCache",
+          "line": 17
+        },
+        {
+          "path": "services/studio/studio/cache.py",
+          "symbol": "RuntimeCache.candidates",
+          "line": 35
+        },
+        {
+          "path": "services/studio/studio/cache.py",
+          "symbol": "RuntimeCache.clean",
+          "line": 135
+        },
+        {
+          "path": "services/studio/studio/cache.py",
+          "symbol": "RuntimeCache.start",
+          "line": 163
+        }
+      ],
+      "risks": [
+        "这是服务端文件缓存管理，不是清空浏览器所有缓存；构建产物清理另在 scripts/clean.py。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-preview-maintenance",
+      "title": "后台预览补齐",
+      "layer": "core",
+      "status": "implemented",
+      "summary": "启动后定期检查缺少低清预览的项目，留出交互队列余量后提交共享预览任务。",
+      "responsibilities": [
+        "既有项目补生成320p",
+        "训练期间让出计算",
+        "失败/取消不无限重试",
+        "每15秒调度检查"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/media_maintenance.py",
+          "symbol": "PreviewMaintenance",
+          "line": 7
+        },
+        {
+          "path": "services/studio/studio/media_maintenance.py",
+          "symbol": "PreviewMaintenance.sweep",
+          "line": 13
+        }
+      ],
+      "risks": [
+        "直接读取 runner._jobs 等内部状态，是后续封装队列统计接口的候选点。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-access",
+      "title": "身份、角色与服务入口策略",
+      "layer": "api",
+      "status": "implemented",
+      "summary": "ServerConfig 区分本机和服务器入口；Access 从配置读取命名账户，并判断共享/私人项目的查看与编辑权限。",
+      "responsibilities": [
+        "admin/editor/viewer",
+        "配置式HTTP Basic账户",
+        "个人草稿所有权",
+        "Origin/Host配置"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/access.py",
+          "symbol": "Access",
+          "line": 21
+        },
+        {
+          "path": "services/studio/studio/access.py",
+          "symbol": "Access.identify",
+          "line": 43
+        },
+        {
+          "path": "services/studio/studio/access.py",
+          "symbol": "Access.view",
+          "line": 58
+        },
+        {
+          "path": "services/studio/studio/access.py",
+          "symbol": "Access.edit",
+          "line": 61
+        },
+        {
+          "path": "services/studio/studio/server_config.py",
+          "symbol": "ServerConfig",
+          "line": 12
+        }
+      ],
+      "risks": [
+        "不是OAuth或公开注册系统，账号来自环境JSON或服务端文件。实际请求级授权和用户绑定会话令牌仍由api.py执行。ServerConfig.authenticate保留着旧Basic校验函数，当前主入口使用Access.identify。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-resource-policy",
+      "title": "低配预算与请求限流",
+      "layer": "api",
+      "status": "implemented",
+      "summary": "ResourcePolicy 校验磁盘、上传、导出和计算预算；RequestLimits 在multipart写入和媒体响应期间执行连接/带宽限制。",
+      "responsibilities": [
+        "上传大小/并发/磁盘余量",
+        "任务数量与时限配置",
+        "低配导出规格",
+        "媒体/高清连接数",
+        "总发送预算"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/resources.py",
+          "symbol": "ResourcePolicy",
+          "line": 25
+        },
+        {
+          "path": "services/studio/studio/resources.py",
+          "symbol": "ResourcePolicy.validate_export",
+          "line": 62
+        },
+        {
+          "path": "services/studio/studio/request_limits.py",
+          "symbol": "RequestLimits",
+          "line": 12
+        },
+        {
+          "path": "services/studio/studio/request_limits.py",
+          "symbol": "RequestLimits.__call__",
+          "line": 24
+        }
+      ],
+      "risks": [
+        "请求限制作用于当前进程，因此需要工作目录锁约束单实例。环境默认值是可配置保护值，不等于已验证的实际承载人数。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-execution",
+      "title": "任务取消、进程树与工作目录锁",
+      "layer": "runtime",
+      "status": "implemented",
+      "summary": "execution 使用任务上下文传播取消和截止时间，管理自身子进程组；WorkspaceLease 防止同一数据目录启动第二个服务。",
+      "responsibilities": [
+        "超时/取消传播",
+        "POSIX进程组与Windows任务树停止",
+        "单工作目录独占",
+        "初始化/关闭释放资源"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/execution.py",
+          "symbol": "task_scope",
+          "line": 18
+        },
+        {
+          "path": "services/studio/studio/execution.py",
+          "symbol": "run_process",
+          "line": 76
+        },
+        {
+          "path": "services/studio/studio/execution.py",
+          "symbol": "watch_process",
+          "line": 56
+        },
+        {
+          "path": "services/studio/studio/execution.py",
+          "symbol": "stop_process",
+          "line": 36
+        },
+        {
+          "path": "services/studio/studio/workspace_lease.py",
+          "symbol": "WorkspaceLease",
+          "line": 6
+        }
+      ],
+      "risks": [
+        "锁在服务恢复逻辑之前取得。不能把该进程内预算画成跨主机分布式调度。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "be-runtime",
+      "title": "运行路径与桌面/源码启动适配",
+      "layer": "runtime",
+      "status": "implemented",
+      "summary": "Settings 给出数据和上游位置；runtime/launcher 在源码、冻结桌面包和独立模型解释器之间构造同一种worker入口。",
+      "responsibilities": [
+        "源码/桌面数据目录",
+        "探测/准备/训练/推理worker派发",
+        "内置FFmpeg与字体路径",
+        "桌面ready/shutdown协议"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/config.py",
+          "symbol": "Settings",
+          "line": 8
+        },
+        {
+          "path": "services/studio/studio/runtime.py",
+          "symbol": "data_root",
+          "line": 21
+        },
+        {
+          "path": "services/studio/studio/runtime.py",
+          "symbol": "worker_command",
+          "line": 49
+        },
+        {
+          "path": "services/studio/studio/runtime.py",
+          "symbol": "configure_runtime",
+          "line": 35
+        },
+        {
+          "path": "services/studio/studio/launcher.py",
+          "symbol": "main",
+          "line": 25
+        }
+      ],
+      "risks": [
+        "HTTP最终由同一 create_app 构建。这里负责启动和环境，不应放项目编辑规则。"
+      ],
+      "tech": "Python"
+    },
+    {
+      "id": "delivery-source",
+      "title": "源码运行入口",
+      "layer": "delivery",
+      "status": "implemented",
+      "summary": "把已经构建的网页交给本机Python API；开发预览可通过Vite转发接口。",
+      "responsibilities": [
+        "源码模式由 scripts/dev.py 启动 studio.api",
+        "资源在仓库内，默认用户数据在 var/；SONGCUT_DATA可覆盖",
+        "CPU/MPS等设备选择由后端负责，UI只请求接口"
+      ],
+      "sources": [
+        {
+          "path": "scripts/dev.py",
+          "symbol": "脚本入口",
+          "line": 6
+        },
+        {
+          "path": "services/studio/studio/runtime.py",
+          "symbol": "resource_root / data_root / worker_command",
+          "line": 13
+        },
+        {
+          "path": "apps/web/vite.config.ts",
+          "symbol": "开发代理",
+          "line": 3
+        }
+      ],
+      "risks": [
+        "Vite开发代理目前固定8765，实际本地8777需显式调整开发代理；生产构建由API同源提供，不走Vite代理。"
+      ],
+      "tech": "Build / Config"
+    },
+    {
+      "id": "delivery-desktop",
+      "title": "Tauri 桌面宿主",
+      "layer": "delivery",
+      "status": "implemented",
+      "summary": "管理本机后端进程与窗口；桌面和浏览器复用同一套网页与HTTP业务。",
+      "responsibilities": [
+        "首选8765，只复用带VTuberSongCut身份的服务",
+        "冲突时改用空闲回环端口，核对就绪文件PID和端口",
+        "关闭窗口只停止自己启动的后端，不停止复用的其他实例"
+      ],
+      "sources": [
+        {
+          "path": "apps/desktop/src-tauri/src/main.rs",
+          "symbol": "Backend",
+          "line": 102
+        },
+        {
+          "path": "apps/desktop/src-tauri/src/main.rs",
+          "symbol": "select_service",
+          "line": 112
+        },
+        {
+          "path": "apps/desktop/src-tauri/src/main.rs",
+          "symbol": "Backend::wait_ready",
+          "line": 266
+        },
+        {
+          "path": "apps/desktop/src-tauri/src/main.rs",
+          "symbol": "main / WebviewWindowBuilder",
+          "line": 318
+        }
+      ],
+      "risks": [
+        "Rust不承担剪辑、模型或媒体算法；WebView打开后端地址。",
+        "当前健康握手检查应用身份，未来协议升级可补充API/资源版本兼容检查。"
+      ],
+      "tech": "Rust / Tauri"
+    },
+    {
+      "id": "delivery-frozen",
+      "title": "独立后端与 worker 打包",
+      "layer": "delivery",
+      "status": "implemented",
+      "summary": "将Python服务、模型运行库、FFmpeg、字体和上游算法包装为桌面可执行运行环境。",
+      "responsibilities": [
+        "PyInstaller onedir 后端随Tauri资源一起分发",
+        "统一分派probe / prepare / train / infer / infer-stream子进程",
+        "权重不随桌面包附送，用户导入已有兼容模型",
+        "成功打包后清理可再生中间文件，打包产物保留"
+      ],
+      "sources": [
+        {
+          "path": "scripts/build_desktop_backend.py",
+          "symbol": "main / 资源收集",
+          "line": 28
+        },
+        {
+          "path": "scripts/build_desktop_backend.py",
+          "symbol": "PyInstaller命令",
+          "line": 127
+        },
+        {
+          "path": "services/studio/studio/launcher.py",
+          "symbol": "main worker dispatcher",
+          "line": 25
+        },
+        {
+          "path": "services/studio/studio/runtime.py",
+          "symbol": "worker_command",
+          "line": 49
+        }
+      ],
+      "risks": [
+        "打包运行数据按macOS/Windows/Linux各自用户数据目录保存，不写安装目录。"
+      ],
+      "tech": "Build / Config"
+    },
+    {
+      "id": "delivery-server",
+      "title": "Linux CPU 容器",
+      "layer": "delivery",
+      "status": "implemented",
+      "summary": "构建网页和固定上游算法，在CPU版Python运行环境中提供同源API和网页。",
+      "responsibilities": [
+        "CPU版PyTorch/torchaudio，无需NVIDIA驱动",
+        "默认低配模式，关闭服务器训练",
+        "/data持久化项目、模型与导出",
+        "CPU/内存/PID、队列、上传、媒体带宽参数由Compose传入"
+      ],
+      "sources": [
+        {
+          "path": "Dockerfile",
+          "symbol": "web / engine / server三阶段镜像",
+          "line": 2
+        },
+        {
+          "path": "Dockerfile",
+          "symbol": "CPU runtime与非root用户",
+          "line": 27
+        },
+        {
+          "path": "compose.yaml",
+          "symbol": "songcut服务与资源预算",
+          "line": 3
+        }
+      ],
+      "risks": [
+        "当前镜像声明CPU依赖与资源预算，不代表已在所有Linux配置完成容量压测。"
+      ],
+      "tech": "Build / Config"
+    },
+    {
+      "id": "delivery-recorder",
+      "title": "独立录播姬服务",
+      "layer": "delivery",
+      "status": "external",
+      "summary": "第三方录播姬负责从B站保存原始码流；拾歌只接完成事件和管理接口。",
+      "responsibilities": [
+        "固定BililiveRecorder 2.20.0镜像",
+        "录播卷在录制器读写、在拾歌只读挂载",
+        "管理端口只在Docker内网暴露",
+        "部署脚本自动设置Webhook V2，再由拾歌录播库添加房间"
+      ],
+      "sources": [
+        {
+          "path": "deploy/compose.recorder.yaml",
+          "symbol": "recorder service",
+          "line": 16
+        },
+        {
+          "path": "scripts/deploy.sh",
+          "symbol": "--recorder与回调初始化",
+          "line": 47
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "main --configure-webhook",
+          "line": 350
+        }
+      ],
+      "risks": [
+        "录制代码不在本仓库，是独立GPL-3.0组件。",
+        "主播画质和Cookie由录播姬处理；本仓库集成测试使用模拟通知和真实合成媒体。"
+      ],
+      "tech": "Build / Config"
+    },
+    {
+      "id": "delivery-entry",
+      "title": "部署编排与域名入口",
+      "layer": "delivery",
+      "status": "implemented",
+      "summary": "一条脚本组合服务、域名TLS、录播与独立账户配置。",
+      "responsibilities": [
+        "生成并保留.env.server凭据",
+        "可选Caddy域名入口，API端口默认只绑定主机回环地址",
+        "server-accounts.json保持0600，通过服务端环境传给非root容器",
+        "仅完成回调配置成功后报告录制入口准备完成"
+      ],
+      "sources": [
+        {
+          "path": "scripts/deploy.sh",
+          "symbol": "Compose参数拼装与凭据保留",
+          "line": 67
+        },
+        {
+          "path": "deploy/compose.domain.yaml",
+          "symbol": "Caddy service",
+          "line": 3
+        },
+        {
+          "path": "deploy/Caddyfile",
+          "symbol": "reverse_proxy",
+          "line": 1
+        },
+        {
+          "path": "deploy/compose.accounts.yaml",
+          "symbol": "独立账户环境配置",
+          "line": 3
+        }
+      ],
+      "risks": [
+        "当前媒体仍经Caddy反代和应用受控文件流；没有独立CDN、对象存储或HLS服务。"
+      ],
+      "tech": "Build / Config"
+    },
+    {
+      "id": "delivery-upstream",
+      "title": "算法来源与兼容补丁",
+      "layer": "delivery",
+      "status": "implemented",
+      "summary": "保证桌面、源码和容器从同一审阅基准取得AutoSlicer，并保留上游代码边界。",
+      "responsibilities": [
+        "固定AutoSlicer-v2基础提交",
+        "应用Apple Silicon兼容补丁",
+        "可选下载官方阿梓检查点并校验SHA-256",
+        "已有上游目录和不同模型不会被静默覆盖"
+      ],
+      "sources": [
+        {
+          "path": "packages/contracts/model-source.json",
+          "symbol": "固定上游提交与权重校验",
+          "line": 2
+        },
+        {
+          "path": "scripts/setup_model.py",
+          "symbol": "读取manifest并安装补丁",
+          "line": 14
+        },
+        {
+          "path": "patches/0001-apple-silicon.patch",
+          "symbol": "Apple兼容补丁",
+          "line": 1
+        }
+      ],
+      "risks": [
+        "upstream/是被Git忽略的第三方克隆，不属于业务源码。",
+        "官方模型scope明确为主播演唱检测，不是歌名识别或声音转换。"
+      ],
+      "tech": "Build / Config"
+    },
+    {
+      "id": "delivery-release",
+      "title": "跨平台构建与发行",
+      "layer": "delivery",
+      "status": "implemented",
+      "summary": "把可运行源码转成各平台独立安装包，并一起保存对应媒体源码、许可与校验信息。",
+      "responsibilities": [
+        "macOS Apple Silicon DMG、Windows x64 NSIS、Linux x64 AppImage/deb",
+        "固定vcpkg基准与FFmpeg功能，复用经过校验的媒体/源码缓存",
+        "PyInstaller后端 → Tauri安装器 → 各系统安装验收 → 校验和 → prerelease",
+        "手动构建可只留产物；部分平台诊断不能发布完整release"
+      ],
+      "sources": [
+        {
+          "path": ".github/workflows/release.yml",
+          "symbol": "validate / platform matrix",
+          "line": 30
+        },
+        {
+          "path": ".github/workflows/release.yml",
+          "symbol": "媒体缓存与构建",
+          "line": 109
+        },
+        {
+          "path": ".github/workflows/release.yml",
+          "symbol": "freeze与安装器测试",
+          "line": 173
+        },
+        {
+          "path": ".github/workflows/release.yml",
+          "symbol": "publish",
+          "line": 300
+        },
+        {
+          "path": "scripts/build_release_media.py",
+          "symbol": "main",
+          "line": 28
+        },
+        {
+          "path": "packaging/vcpkg.json",
+          "symbol": "受控FFmpeg功能",
+          "line": 4
+        }
+      ],
+      "risks": [
+        "这条重型构建路径才包含FFmpeg源码编译；日常网页编辑和Python开发不必经过它。",
+        "源码分支功能存在不等于相同功能已进入已发布安装包。"
+      ],
+      "tech": "Build / Config"
+    },
+    {
+      "id": "delivery-quality",
+      "title": "测试与交付门禁",
+      "layer": "delivery",
+      "status": "implemented",
+      "summary": "分别验证核心行为、网页构建、真实媒体/子进程以及安装与容器边界。",
+      "responsibilities": [
+        "核心CI在三种操作系统跑Python测试，网页CI运行TypeScript构建和Node测试",
+        "Docker工作流测试认证、CPU运行时、上传、Range和持久化",
+        "发行工作流检查独立后端训练/推理、媒体工具和真实安装器内容",
+        "隔离测试覆盖权限、取消、恢复、低清、录制事件与缓存"
+      ],
+      "sources": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "symbol": "backend / web jobs",
+          "line": 3
+        },
+        {
+          "path": ".github/workflows/server.yml",
+          "symbol": "真实容器验收",
+          "line": 11
+        },
+        {
+          "path": "scripts/smoke_desktop_backend.py",
+          "symbol": "main",
+          "line": 18
+        },
+        {
+          "path": "services/studio/tests/test_recorder_flow.py",
+          "symbol": "真实媒体录制入库流程测试",
+          "line": 18
+        },
+        {
+          "path": "apps/web/tests/playback.test.mjs",
+          "symbol": "预览与草稿行为测试",
+          "line": 1
+        }
+      ],
+      "risks": [
+        "此审计只读源码，没有重新执行测试。",
+        "2026-10-28验收文档记录246后端测试通过、1可选跳过，前端49通过；实际运行数量与平台/可选依赖有关。"
+      ],
+      "tech": "Build / Config"
+    },
+    {
+      "id": "delivery-contracts",
+      "title": "API契约与类型镜像",
+      "layer": "delivery",
+      "status": "implemented",
+      "summary": "目前由Python模型、FastAPI路由、静态OpenAPI文件和TS接口共同描述协议，但尚未形成自动同步的单一来源。",
+      "responsibilities": [
+        "后端Pydantic校验请求和领域对象",
+        "前端TypeScript描述工程、任务、训练和录制响应",
+        "静态OpenAPI作为参考文档存在"
+      ],
+      "sources": [
+        {
+          "path": "packages/contracts/openapi.json",
+          "symbol": "静态API快照",
+          "line": 1
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "HTTP路由与动态响应",
+          "line": 195
+        },
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "Pydantic领域记录",
+          "line": 1
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "手工TypeScript接口与HTTP访问",
+          "line": 1
+        }
+      ],
+      "risks": [
+        "静态快照32个操作，当前源码45个操作；缺13个新增操作。",
+        "Project静态schema缺9个新字段；can_edit/can_clone为动态响应字段。",
+        "部分新路由没有显式response_model，直接重生成OpenAPI不足以恢复完整TS类型。"
+      ],
+      "tech": "Build / Config"
+    },
+    {
+      "id": "external-recorder",
+      "title": "BililiveRecorder 2.20.0",
+      "layer": "external",
+      "status": "external",
+      "summary": "独立进程/容器，REST控制与Webhook通知",
+      "responsibilities": [
+        "独立进程/容器，REST控制与Webhook通知"
+      ],
+      "sources": [
+        {
+          "path": "deploy/compose.recorder.yaml",
+          "line": 1,
+          "symbol": "依赖接入位置"
+        },
+        {
+          "path": "docs/RECORDING.md",
+          "line": 1,
+          "symbol": "依赖接入位置"
+        }
+      ],
+      "risks": [
+        "此节点是外部依赖，不表示其代码由拾歌实现。"
+      ],
+      "tech": "External"
+    },
+    {
+      "id": "external-ffmpeg",
+      "title": "FFmpeg / FFprobe",
+      "layer": "external",
+      "status": "external",
+      "summary": "媒体处理子进程",
+      "responsibilities": [
+        "媒体处理子进程"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/adapters/media.py",
+          "line": 1,
+          "symbol": "依赖接入位置"
+        }
+      ],
+      "risks": [
+        "此节点是外部依赖，不表示其代码由拾歌实现。"
+      ],
+      "tech": "External"
+    },
+    {
+      "id": "external-autoslicer",
+      "title": "AutoSlicer-v2",
+      "layer": "external",
+      "status": "external",
+      "summary": "固定上游源码与兼容补丁；模型/LogMel/后处理/训练入口",
+      "responsibilities": [
+        "固定上游源码与兼容补丁；模型/LogMel/后处理/训练入口"
+      ],
+      "sources": [
+        {
+          "path": "packages/contracts/model-source.json",
+          "line": 1,
+          "symbol": "依赖接入位置"
+        },
+        {
+          "path": "patches/0001-apple-silicon.patch",
+          "line": 1,
+          "symbol": "依赖接入位置"
+        }
+      ],
+      "risks": [
+        "此节点是外部依赖，不表示其代码由拾歌实现。"
+      ],
+      "tech": "External"
+    },
+    {
+      "id": "external-sqlite",
+      "title": "SQLite",
+      "layer": "external",
+      "status": "external",
+      "summary": "单工作目录WAL数据库文件",
+      "responsibilities": [
+        "单工作目录WAL数据库文件"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/store.py",
+          "line": 1,
+          "symbol": "依赖接入位置"
+        }
+      ],
+      "risks": [
+        "此节点是外部依赖，不表示其代码由拾歌实现。"
+      ],
+      "tech": "External"
+    },
+    {
+      "id": "planned-ts-services",
+      "title": "建议：独立 TS 应用服务",
+      "layer": "ts",
+      "status": "planned",
+      "summary": "把状态与流程从组件迁出，以服务类复用；这是重构目标，不是已有模块。",
+      "responsibilities": [
+        "EditorSession 管草稿与保存流程",
+        "PreviewCoordinator 管清晰度与异步响应",
+        "TrainingController 管训练工作区用例"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/main.tsx",
+          "line": 122,
+          "symbol": "App（当前迁出位置）"
+        }
+      ],
+      "risks": [
+        "上述类目前尚未创建。",
+        "纯时间计算与校验保留函数，服务端继续执行最终校验。"
+      ],
+      "tech": "Proposed TS classes"
+    },
+    {
+      "id": "future-capability-0",
+      "title": "自动歌名与原唱识别",
+      "layer": "core",
+      "status": "interface",
+      "summary": "仅定义输入输出协议，尚无提供方实现。",
+      "responsibilities": [
+        "参考库/指纹匹配适配器、任务与结果确认流程。当前歌曲名称手动填写，detector只生成待识别片段。"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "SongIdentifier",
+          "line": 11
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "_create_app.capabilities",
+          "line": 282
+        }
+      ],
+      "risks": [
+        "这里的代码是协议或当前边界，不表示目标能力已实现。"
+      ],
+      "tech": "Python Protocol"
+    },
+    {
+      "id": "future-capability-1",
+      "title": "歌词自动搜索与逐字对齐",
+      "layer": "core",
+      "status": "interface",
+      "summary": "仅定义输入输出协议，尚无提供方实现。",
+      "responsibilities": [
+        "歌词来源适配器和对齐引擎；目前只有LRC导入与已有时间戳的ASS输出。"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "LyricsProvider",
+          "line": 15
+        },
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "LyricsAligner",
+          "line": 19
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "_create_app.capabilities",
+          "line": 282
+        }
+      ],
+      "risks": [
+        "这里的代码是协议或当前边界，不表示目标能力已实现。"
+      ],
+      "tech": "Python Protocol"
+    },
+    {
+      "id": "future-capability-2",
+      "title": "AI封面和AI标题",
+      "layer": "core",
+      "status": "interface",
+      "summary": "仅定义输入输出协议，尚无提供方实现。",
+      "responsibilities": [
+        "实际模型/服务适配器、用户选择与生成任务。"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "CoverGenerator",
+          "line": 27
+        },
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "TitleGenerator",
+          "line": 31
+        }
+      ],
+      "risks": [
+        "这里的代码是协议或当前边界，不表示目标能力已实现。"
+      ],
+      "tech": "Python Protocol"
+    },
+    {
+      "id": "future-capability-3",
+      "title": "自动上传B站或音乐播放器",
+      "layer": "core",
+      "status": "interface",
+      "summary": "仅定义输入输出协议，尚无提供方实现。",
+      "responsibilities": [
+        "发布实现、凭据与目标平台状态/重试。B站录制接入不能等同于B站上传。"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "Publisher",
+          "line": 35
+        }
+      ],
+      "risks": [
+        "这里的代码是协议或当前边界，不表示目标能力已实现。"
+      ],
+      "tech": "Python Protocol"
+    },
+    {
+      "id": "future-capability-4",
+      "title": "分布式计算/远程Mac执行节点",
+      "layer": "core",
+      "status": "planned",
+      "summary": "规划中的能力，当前没有远程任务协议或执行节点。",
+      "responsibilities": [
+        "远程任务协议、节点租约和共享存储；当前强制每数据目录单API实例。"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner",
+          "line": 10
+        },
+        {
+          "path": "services/studio/studio/workspace_lease.py",
+          "symbol": "WorkspaceLease",
+          "line": 6
+        }
+      ],
+      "risks": [
+        "这里的代码是协议或当前边界，不表示目标能力已实现。"
+      ],
+      "tech": "Proposed capability"
+    }
+  ],
+  "edges": [
+    {
+      "from": "be-ports",
+      "to": "be-domain",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-domain",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-studio",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-jobs",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-store",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-models",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-training",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-recorder",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-recorder-api",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-cache",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-preview-maintenance",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-access",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-resource-policy",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-execution",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-api",
+      "to": "be-runtime",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-domain",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-jobs",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-store",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-media",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-detector",
+      "label": "注入检测器",
+      "kind": "control"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-lyrics",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-resource-policy",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-studio",
+      "to": "be-execution",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-jobs",
+      "to": "be-domain",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-jobs",
+      "to": "be-store",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-jobs",
+      "to": "be-resource-policy",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-jobs",
+      "to": "be-execution",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-store",
+      "to": "be-domain",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-media",
+      "to": "be-domain",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-media",
+      "to": "be-lyrics",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-media",
+      "to": "be-execution",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-lyrics",
+      "to": "be-domain",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-models",
+      "to": "be-domain",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-models",
+      "to": "be-store",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-models",
+      "to": "be-model-probe",
+      "label": "独立进程调用",
+      "kind": "control"
+    },
+    {
+      "from": "be-models",
+      "to": "be-runtime",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-detector",
+      "to": "be-domain",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-detector",
+      "to": "be-inference",
+      "label": "独立进程调用",
+      "kind": "control"
+    },
+    {
+      "from": "be-detector",
+      "to": "be-runtime",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-detector",
+      "to": "be-execution",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-training",
+      "to": "be-store",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-training",
+      "to": "be-training-worker",
+      "label": "独立进程调用",
+      "kind": "control"
+    },
+    {
+      "from": "be-training",
+      "to": "be-models",
+      "label": "完成后登记回调",
+      "kind": "control"
+    },
+    {
+      "from": "be-training",
+      "to": "be-runtime",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-training-worker",
+      "to": "be-runtime",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-recorder",
+      "to": "be-store",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-recorder-api",
+      "to": "be-recorder",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-cache",
+      "to": "be-domain",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-cache",
+      "to": "be-store",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-cache",
+      "to": "be-studio",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-cache",
+      "to": "be-media",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-preview-maintenance",
+      "to": "be-studio",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-preview-maintenance",
+      "to": "be-jobs",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-preview-maintenance",
+      "to": "be-store",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-preview-maintenance",
+      "to": "be-training",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-access",
+      "to": "be-domain",
+      "label": "调用/依赖",
+      "kind": "control"
+    },
+    {
+      "from": "be-recorder",
+      "to": "be-api",
+      "label": "完成文件登记回调",
+      "kind": "control"
+    },
+    {
+      "from": "be-runtime",
+      "to": "be-api",
+      "label": "launcher启动HTTP服务",
+      "kind": "control"
+    },
+    {
+      "from": "be-inference",
+      "to": "external-ffmpeg",
+      "label": "PCM解码管道",
+      "kind": "control"
+    },
+    {
+      "from": "be-inference",
+      "to": "external-autoslicer",
+      "label": "模型/LogMel/后处理",
+      "kind": "control"
+    },
+    {
+      "from": "be-training-worker",
+      "to": "external-autoslicer",
+      "label": "原train.py",
+      "kind": "control"
+    },
+    {
+      "from": "be-model-probe",
+      "to": "external-autoslicer",
+      "label": "检查模型形状和设备",
+      "kind": "control"
+    },
+    {
+      "from": "be-media",
+      "to": "external-ffmpeg",
+      "label": "探测/预览/导出",
+      "kind": "control"
+    },
+    {
+      "from": "be-recorder",
+      "to": "external-recorder",
+      "label": "房间与配置REST",
+      "kind": "control"
+    },
+    {
+      "from": "external-recorder",
+      "to": "be-recorder-api",
+      "label": "FileClosed完成通知",
+      "kind": "control"
+    },
+    {
+      "from": "be-store",
+      "to": "external-sqlite",
+      "label": "事务与快照",
+      "kind": "data"
+    },
+    {
+      "from": "fe-app",
+      "to": "fe-project-flow",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-app",
+      "to": "fe-timeline",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-app",
+      "to": "fe-timecode",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-app",
+      "to": "fe-export-controls",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-app",
+      "to": "fe-training",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-app",
+      "to": "fe-models",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-app",
+      "to": "fe-recordings",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-app",
+      "to": "fe-upload-feedback",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-app",
+      "to": "fe-appearance",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-app",
+      "to": "fe-cache",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-app",
+      "to": "fe-welcome",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-app",
+      "to": "fe-theme",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-app",
+      "to": "fe-lyrics",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-project-flow",
+      "to": "fe-api",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-project-flow",
+      "to": "fe-types",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-project-flow",
+      "to": "fe-editing",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-project-flow",
+      "to": "fe-playback",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-project-flow",
+      "to": "fe-polling",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-api",
+      "to": "fe-types",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-editing",
+      "to": "fe-types",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-playback",
+      "to": "fe-types",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-timeline",
+      "to": "fe-editing",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-timeline",
+      "to": "fe-types",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-timecode",
+      "to": "fe-editing",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-export-controls",
+      "to": "fe-types",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-training",
+      "to": "fe-api",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-training",
+      "to": "fe-types",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-training",
+      "to": "fe-annotation",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-training",
+      "to": "fe-polling",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-training",
+      "to": "fe-upload-feedback",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-annotation",
+      "to": "fe-api",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-annotation",
+      "to": "fe-types",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-annotation",
+      "to": "fe-editing",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-annotation",
+      "to": "fe-timecode",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-annotation",
+      "to": "fe-polling",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-annotation",
+      "to": "fe-upload-feedback",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-models",
+      "to": "fe-api",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-models",
+      "to": "fe-types",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-recordings",
+      "to": "fe-api",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-recordings",
+      "to": "fe-types",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-recordings",
+      "to": "fe-polling",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-upload-feedback",
+      "to": "fe-types",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-appearance",
+      "to": "fe-theme",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-cache",
+      "to": "fe-api",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-cache",
+      "to": "fe-types",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-lyrics",
+      "to": "fe-api",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-lyrics",
+      "to": "fe-types",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "fe-lyrics",
+      "to": "fe-project-flow",
+      "label": "调用 / 依赖",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-source",
+      "to": "be-api",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-source",
+      "to": "be-runtime",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-desktop",
+      "to": "be-runtime",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-frozen",
+      "to": "be-model-probe",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-frozen",
+      "to": "be-training-worker",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-frozen",
+      "to": "be-inference",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-frozen",
+      "to": "delivery-upstream",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-server",
+      "to": "be-api",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-server",
+      "to": "be-resource-policy",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-server",
+      "to": "delivery-upstream",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-recorder",
+      "to": "be-recorder-api",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-recorder",
+      "to": "be-recorder",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-entry",
+      "to": "delivery-server",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-entry",
+      "to": "delivery-recorder",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-entry",
+      "to": "be-access",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-upstream",
+      "to": "be-models",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-upstream",
+      "to": "be-detector",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-release",
+      "to": "delivery-frozen",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-release",
+      "to": "delivery-quality",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-quality",
+      "to": "delivery-release",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-contracts",
+      "to": "be-recorder-api",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-contracts",
+      "to": "be-ports",
+      "label": "运行 / 构建引用",
+      "kind": "control"
+    },
+    {
+      "from": "fe-api",
+      "to": "be-api",
+      "label": "HTTP / JSON / Range",
+      "kind": "control"
+    },
+    {
+      "from": "fe-recordings",
+      "to": "be-recorder-api",
+      "label": "录播查询与控制",
+      "kind": "control"
+    },
+    {
+      "from": "fe-training",
+      "to": "be-training",
+      "label": "经 HTTP 调用",
+      "kind": "control"
+    },
+    {
+      "from": "delivery-desktop",
+      "to": "fe-app",
+      "label": "WebView 复用网页",
+      "kind": "control"
+    },
+    {
+      "from": "fe-app",
+      "to": "planned-ts-services",
+      "label": "建议迁出交互用例",
+      "kind": "planned"
+    },
+    {
+      "from": "planned-ts-services",
+      "to": "fe-api",
+      "label": "建议经端口调用",
+      "kind": "planned"
+    },
+    {
+      "from": "be-ports",
+      "to": "future-capability-0",
+      "label": "协议预留",
+      "kind": "planned"
+    },
+    {
+      "from": "be-ports",
+      "to": "future-capability-1",
+      "label": "协议预留",
+      "kind": "planned"
+    },
+    {
+      "from": "be-ports",
+      "to": "future-capability-2",
+      "label": "协议预留",
+      "kind": "planned"
+    },
+    {
+      "from": "be-ports",
+      "to": "future-capability-3",
+      "label": "协议预留",
+      "kind": "planned"
+    },
+    {
+      "from": "be-jobs",
+      "to": "future-capability-4",
+      "label": "未来扩展，未接入",
+      "kind": "planned"
+    }
+  ],
+  "features": [
+    {
+      "id": "recording",
+      "title": "B站录制与自动入库",
+      "status": "implemented",
+      "description": "录制器独立保存原片；文件完成后经认证通知登记，预览进入拾歌计算队列。",
+      "steps": [
+        {
+          "node": "fe-recordings",
+          "title": "添加 / 控制房间",
+          "detail": "录播库调用管理员接口；普通账户只浏览已归档素材。",
+          "source": {
+            "path": "apps/web/src/RecordingsWorkspace.tsx",
+            "symbol": "RecordingsWorkspace",
+            "line": 18
+          }
+        },
+        {
+          "node": "be-recorder-api",
+          "title": "接收控制与通知",
+          "detail": "控制走账户权限；精确的 webhook POST 使用独立随机密钥。",
+          "source": {
+            "path": "services/studio/studio/recording_api.py",
+            "symbol": "recording_router",
+            "line": 23
+          }
+        },
+        {
+          "node": "be-recorder",
+          "title": "持久去重 / 稳定检查",
+          "detail": "校验完成事件、文件大小、路径与稳定性；相同事件不重复入库。",
+          "source": {
+            "path": "services/studio/studio/recorder.py",
+            "symbol": "RecorderService.accept",
+            "line": 185
+          }
+        },
+        {
+          "node": "be-api",
+          "title": "登记共享素材",
+          "detail": "import_recording 按确定ID创建或复用Project，原片只读引用。",
+          "source": {
+            "path": "services/studio/studio/api.py",
+            "symbol": "_create_app.import_recording",
+            "line": 140
+          }
+        },
+        {
+          "node": "be-studio",
+          "title": "提交预览",
+          "detail": "按源签名和规格复用或提交low预览。",
+          "source": {
+            "path": "services/studio/studio/service.py",
+            "symbol": "Studio.preview",
+            "line": 103
+          }
+        },
+        {
+          "node": "be-jobs",
+          "title": "串行执行",
+          "detail": "有界公平队列承接后台工作，不在回调请求中转码。",
+          "source": {
+            "path": "services/studio/studio/jobs.py",
+            "symbol": "JobRunner._worker",
+            "line": 77
+          }
+        },
+        {
+          "node": "be-media",
+          "title": "生成320p",
+          "detail": "FFmpeg生成共享低清文件，进度及临时输出受控。",
+          "source": {
+            "path": "services/studio/studio/adapters/media.py",
+            "symbol": "FFmpegMedia.preview",
+            "line": 150
+          }
+        },
+        {
+          "node": "fe-recordings",
+          "title": "打开剪辑",
+          "detail": "用户打开录播；编辑者先创建个人副本。",
+          "source": {
+            "path": "apps/web/src/RecordingsWorkspace.tsx",
+            "symbol": "RecordingsWorkspace",
+            "line": 18
+          }
+        }
+      ],
+      "outputs": [
+        "SQLite：recordings / recorder_events / recorder_state / projects / jobs",
+        "原片仍在录播目录，预览进入 data/previews/"
+      ],
+      "caveats": [
+        "录制与B站投稿是不同能力。",
+        "本轮支持已关闭文件；不读取仍在录制中的文件。",
+        "录播姬是外部 GPL-3.0 服务。"
+      ],
+      "tests": [
+        "services/studio/tests/test_recorder.py",
+        "services/studio/tests/test_recorder_flow.py"
+      ]
+    },
+    {
+      "id": "preview",
+      "title": "导入与双清晰度预览",
+      "status": "implemented",
+      "description": "上传落盘后生成共享320p；高清按需准备，UI只切换播放来源和保留时间位置。",
+      "steps": [
+        {
+          "node": "fe-api",
+          "title": "上传文件",
+          "detail": "XHR报告实际传输进度，字节上传完毕后仍等待素材检查。",
+          "source": {
+            "path": "apps/web/src/api.ts",
+            "symbol": "uploadForm",
+            "line": 439
+          }
+        },
+        {
+          "node": "be-resource-policy",
+          "title": "检查预算",
+          "detail": "请求流和落盘阶段检查大小、并发及磁盘余量。",
+          "source": {
+            "path": "services/studio/studio/request_limits.py",
+            "symbol": "RequestLimits.__call__",
+            "line": 24
+          }
+        },
+        {
+          "node": "be-api",
+          "title": "探测 / 建项目",
+          "detail": "读取媒体规格，登记原片与所有者。",
+          "source": {
+            "path": "services/studio/studio/api.py",
+            "symbol": "_create_app.upload",
+            "line": 302
+          }
+        },
+        {
+          "node": "be-studio",
+          "title": "选择衍生缓存",
+          "detail": "源签名+规格版本确定共享预览；不会修改原始录播。",
+          "source": {
+            "path": "services/studio/studio/service.py",
+            "symbol": "Studio.preview",
+            "line": 103
+          }
+        },
+        {
+          "node": "be-jobs",
+          "title": "排队处理",
+          "detail": "相同准备请求复用任务，全局执行位受限。",
+          "source": {
+            "path": "services/studio/studio/jobs.py",
+            "symbol": "JobRunner._worker",
+            "line": 77
+          }
+        },
+        {
+          "node": "be-media",
+          "title": "生成 / 复用播放版",
+          "detail": "low强制最高320p；high最高1080p，兼容时复制码流。",
+          "source": {
+            "path": "services/studio/studio/adapters/media.py",
+            "symbol": "FFmpegMedia.preview",
+            "line": 150
+          }
+        },
+        {
+          "node": "fe-playback",
+          "title": "合并准备结果",
+          "detail": "只合并预览元数据，不能覆盖未保存草稿。",
+          "source": {
+            "path": "apps/web/src/playback.ts",
+            "symbol": "mergePreviewMetadata",
+            "line": 14
+          }
+        }
+      ],
+      "outputs": [
+        "Project媒体元数据；共享低清/高清文件",
+        "320p是播放副本，导出和检测仍读取原片"
+      ],
+      "caveats": [
+        "旧兼容预览不能直接冒充320p。",
+        "预览完成不增加编辑revision。"
+      ],
+      "tests": [
+        "apps/web/tests/uploads.test.mjs",
+        "apps/web/tests/playback.test.mjs",
+        "services/studio/tests/test_preview_profiles.py"
+      ]
+    },
+    {
+      "id": "editing",
+      "title": "边界编辑与保存",
+      "status": "implemented",
+      "description": "鼠标、键盘和时间码统一更新源时间轴上的草稿，再携带版本保存。",
+      "steps": [
+        {
+          "node": "fe-timeline",
+          "title": "拖动 / 逐帧",
+          "detail": "交互改变入点出点；不会发起视频转码。",
+          "source": {
+            "path": "apps/web/src/Timeline.tsx",
+            "symbol": "Timeline",
+            "line": 16
+          }
+        },
+        {
+          "node": "fe-timecode",
+          "title": "输入时间码",
+          "detail": "输入验证、格式化和键盘微调。",
+          "source": {
+            "path": "apps/web/src/TimecodeInput.tsx",
+            "symbol": "TimecodeInput",
+            "line": 13
+          }
+        },
+        {
+          "node": "fe-editing",
+          "title": "纯规则校验",
+          "detail": "毫秒/帧换算与项目校验，适合继续复用纯函数。",
+          "source": {
+            "path": "apps/web/src/editing.ts",
+            "symbol": "validateProject",
+            "line": 57
+          }
+        },
+        {
+          "node": "fe-project-flow",
+          "title": "草稿 / 保存",
+          "detail": "App比较编辑快照、提交revision并处理冲突。",
+          "source": {
+            "path": "apps/web/src/main.tsx",
+            "symbol": "save",
+            "line": 613
+          }
+        },
+        {
+          "node": "be-domain",
+          "title": "最终领域校验",
+          "detail": "服务端校验区间、歌词和导出参数。",
+          "source": {
+            "path": "services/studio/studio/domain.py",
+            "symbol": "Project.validate_clips",
+            "line": 122
+          }
+        },
+        {
+          "node": "be-store",
+          "title": "乐观锁写入",
+          "detail": "UPDATE要求revision匹配，防止静默覆盖其他页面的修改。",
+          "source": {
+            "path": "services/studio/studio/store.py",
+            "symbol": "Store.save",
+            "line": 48
+          }
+        }
+      ],
+      "outputs": [
+        "Project / Clip元数据更新",
+        "原片、预览文件不因调整边界而变化"
+      ],
+      "caveats": [
+        "当前草稿和保存编排仍内嵌App。",
+        "服务端校验不能随UI重构而移除。"
+      ],
+      "tests": [
+        "services/studio/tests/test_core.py",
+        "apps/web/tests/project-edits.test.mjs"
+      ]
+    },
+    {
+      "id": "export",
+      "title": "快速 / 精确导出",
+      "status": "implemented",
+      "description": "提交时固定项目快照；重任务排队，下载访问仍要经过项目权限检查。",
+      "steps": [
+        {
+          "node": "fe-export-controls",
+          "title": "选择规格",
+          "detail": "精确/快速、视频/音频、码率/分辨率等是Clip设置。",
+          "source": {
+            "path": "apps/web/src/ExportControls.tsx",
+            "symbol": "ExportControls",
+            "line": 13
+          }
+        },
+        {
+          "node": "be-resource-policy",
+          "title": "限制耗时与规格",
+          "detail": "低配模式限制导出长度、分辨率、编码和帧率。",
+          "source": {
+            "path": "services/studio/studio/resources.py",
+            "symbol": "ResourcePolicy.validate_export",
+            "line": 62
+          }
+        },
+        {
+          "node": "be-studio",
+          "title": "固定快照 / 复用结果",
+          "detail": "相同渲染设置可复用已有媒体；每人仍保留独立快照。",
+          "source": {
+            "path": "services/studio/studio/service.py",
+            "symbol": "Studio.export",
+            "line": 133
+          }
+        },
+        {
+          "node": "be-jobs",
+          "title": "公平排队",
+          "detail": "每人和全局配额；结构化任务可以重启后重新处理。",
+          "source": {
+            "path": "services/studio/studio/jobs.py",
+            "symbol": "JobRunner._worker",
+            "line": 77
+          }
+        },
+        {
+          "node": "be-media",
+          "title": "执行FFmpeg",
+          "detail": "快速复制码流；精确模式重编码并可烧录字幕。",
+          "source": {
+            "path": "services/studio/studio/adapters/media.py",
+            "symbol": "FFmpegMedia.render",
+            "line": 288
+          }
+        },
+        {
+          "node": "be-api",
+          "title": "受控下载",
+          "detail": "只提供任务声明的产物，核对项目访问权限。",
+          "source": {
+            "path": "services/studio/studio/api.py",
+            "symbol": "_create_app.artifact",
+            "line": 446
+          }
+        }
+      ],
+      "outputs": [
+        "MP4、MP3、可选ASS字幕和项目快照",
+        "下载文件属于任务上下文"
+      ],
+      "caveats": [
+        "快速切点受关键帧影响，不等同逐帧精确。",
+        "导出始终使用高清原片。"
+      ],
+      "tests": [
+        "services/studio/tests/test_export_modes.py",
+        "services/studio/tests/test_shared_derivatives.py"
+      ]
+    },
+    {
+      "id": "detection",
+      "title": "CPU演唱区间检测",
+      "status": "implemented",
+      "description": "已训练模型判断目标主播是否在唱歌；当前不自动识别歌名。",
+      "steps": [
+        {
+          "node": "fe-models",
+          "title": "选模型 / 设备",
+          "detail": "项目必须显式选择目标主播模型。",
+          "source": {
+            "path": "apps/web/src/ModelControls.tsx",
+            "symbol": "ModelSelector",
+            "line": 6
+          }
+        },
+        {
+          "node": "be-models",
+          "title": "校验模型与设备",
+          "detail": "解析模型路径、哈希和可用设备。",
+          "source": {
+            "path": "services/studio/studio/model_library.py",
+            "symbol": "ModelLibrary.resolve",
+            "line": 115
+          }
+        },
+        {
+          "node": "be-studio",
+          "title": "提交检测",
+          "detail": "源身份与模型/参数进入任务和缓存键。",
+          "source": {
+            "path": "services/studio/studio/service.py",
+            "symbol": "Studio.detect",
+            "line": 60
+          }
+        },
+        {
+          "node": "be-detector",
+          "title": "启动模型进程",
+          "detail": "CPU/auto走stream入口，显式GPU沿原路径。",
+          "source": {
+            "path": "services/studio/studio/adapters/autoslicer.py",
+            "symbol": "AutoSlicerDetector.detect",
+            "line": 17
+          }
+        },
+        {
+          "node": "be-inference",
+          "title": "分块音频推理",
+          "detail": "流式读取音频窗口，复用上游模型/特征/后处理。",
+          "source": {
+            "path": "services/studio/studio/inference_worker.py",
+            "symbol": "main",
+            "line": 163
+          }
+        },
+        {
+          "node": "be-studio",
+          "title": "合并区间",
+          "detail": "保留已有手工片段；模型已切换则拒绝写入旧结果。",
+          "source": {
+            "path": "services/studio/studio/service.py",
+            "symbol": "Studio._detect",
+            "line": 74
+          }
+        }
+      ],
+      "outputs": [
+        "低帧率概率与演唱区间",
+        "Project新增待识别歌曲片段"
+      ],
+      "caveats": [
+        "CRNN默认120秒窗口；TCN保留较长上下文。",
+        "弱Linux真实速度和识别精度必须实测。"
+      ],
+      "tests": [
+        "services/studio/tests/test_inference_streaming.py",
+        "services/studio/tests/test_models.py"
+      ]
+    },
+    {
+      "id": "training",
+      "title": "本地标注与模型训练",
+      "status": "implemented",
+      "description": "独立训练工作区准备数据、保存标注，交给训练服务和独立worker。",
+      "steps": [
+        {
+          "node": "fe-training",
+          "title": "创建数据集 / 上传",
+          "detail": "主播名称、训练/验证用途与复核条件。",
+          "source": {
+            "path": "apps/web/src/TrainingWorkspace.tsx",
+            "symbol": "TrainingWorkspace",
+            "line": 88
+          }
+        },
+        {
+          "node": "fe-annotation",
+          "title": "标注演唱区间",
+          "detail": "视频快捷键、时间范围、演唱者与复核状态。",
+          "source": {
+            "path": "apps/web/src/TrainingAnnotation.tsx",
+            "symbol": "TrainingAnnotation",
+            "line": 14
+          }
+        },
+        {
+          "node": "be-training",
+          "title": "校验 / 固定快照",
+          "detail": "检查数据集版本和准备度，使用独立训练队列。",
+          "source": {
+            "path": "services/studio/studio/training.py",
+            "symbol": "TrainingService.start",
+            "line": 229
+          }
+        },
+        {
+          "node": "be-training-worker",
+          "title": "提取特征 / 训练",
+          "detail": "校验素材哈希，生成LogMel和标签清单，调用上游train。",
+          "source": {
+            "path": "services/studio/studio/training_worker.py",
+            "symbol": "main",
+            "line": 23
+          }
+        },
+        {
+          "node": "be-models",
+          "title": "登记成功模型",
+          "detail": "有限值、格式和语义校验后进入模型库。",
+          "source": {
+            "path": "services/studio/studio/model_library.py",
+            "symbol": "ModelLibrary.register_file",
+            "line": 137
+          }
+        }
+      ],
+      "outputs": [
+        "training_datasets / training_jobs",
+        "特征、日志、检查点和受管模型"
+      ],
+      "caveats": [
+        "训练不走媒体JobRunner，而是TrainingService自身工作器。",
+        "低配服务器关闭训练，本地正常模式保留。"
+      ],
+      "tests": [
+        "services/studio/tests/test_training.py",
+        "apps/web/tests/training-recovery.test.mjs"
+      ]
+    },
+    {
+      "id": "models",
+      "title": "模型导入与模型库",
+      "status": "implemented",
+      "description": "检查点验证在独立模型进程执行；模型存为受管资产。",
+      "steps": [
+        {
+          "node": "fe-models",
+          "title": "选择模型文件",
+          "detail": "导入已有.pt/.pth，填写可选名称。",
+          "source": {
+            "path": "apps/web/src/ModelControls.tsx",
+            "symbol": "ModelManager",
+            "line": 201
+          }
+        },
+        {
+          "node": "be-models",
+          "title": "复制 / 哈希 / 登记",
+          "detail": "按SHA-256管理文件，维护模型来源。",
+          "source": {
+            "path": "services/studio/studio/model_library.py",
+            "symbol": "ModelLibrary.register_file",
+            "line": 137
+          }
+        },
+        {
+          "node": "be-model-probe",
+          "title": "隔离验证",
+          "detail": "weights-only CPU加载，验证结构、形状和有限值。",
+          "source": {
+            "path": "services/studio/studio/model_probe.py",
+            "symbol": "main",
+            "line": 8
+          }
+        },
+        {
+          "node": "fe-models",
+          "title": "带回切歌",
+          "detail": "选择模型，保存到具体项目。",
+          "source": {
+            "path": "apps/web/src/ModelControls.tsx",
+            "symbol": "ModelSelector",
+            "line": 6
+          }
+        }
+      ],
+      "outputs": [
+        "models表与受管权重文件"
+      ],
+      "caveats": [
+        "RVC模型不能直接充当演唱检测器。",
+        "模型库名称不代表权重自动识别了主播身份。"
+      ],
+      "tests": [
+        "services/studio/tests/test_models.py"
+      ]
+    },
+    {
+      "id": "lyrics",
+      "title": "LRC歌词与字幕样式",
+      "status": "implemented",
+      "description": "已有歌词的时间解析、预览与导出已实现；自动搜索和逐词对齐另属预留能力。",
+      "steps": [
+        {
+          "node": "fe-lyrics",
+          "title": "导入LRC / 改样式",
+          "detail": "当前界面与歌词事件仍内嵌App。",
+          "source": {
+            "path": "apps/web/src/main.tsx",
+            "symbol": "importLyrics",
+            "line": 762
+          }
+        },
+        {
+          "node": "be-lyrics",
+          "title": "解析与时间偏移",
+          "detail": "转换为源时间轴毫秒，检查范围与先后。",
+          "source": {
+            "path": "services/studio/studio/adapters/lyrics.py",
+            "symbol": "parse_lrc",
+            "line": 8
+          }
+        },
+        {
+          "node": "be-domain",
+          "title": "保存歌词结构",
+          "detail": "LyricCue与可选LyricWord遵守同一时间基准。",
+          "source": {
+            "path": "services/studio/studio/domain.py",
+            "symbol": "LyricCue",
+            "line": 27
+          }
+        },
+        {
+          "node": "be-lyrics",
+          "title": "生成ASS",
+          "detail": "单行、双行、KTV布局；无真实逐词时间不假造精确逐字。",
+          "source": {
+            "path": "services/studio/studio/adapters/lyrics.py",
+            "symbol": "render_ass",
+            "line": 55
+          }
+        },
+        {
+          "node": "be-media",
+          "title": "烧录导出",
+          "detail": "需要字幕时由FFmpeg/libass执行。",
+          "source": {
+            "path": "services/studio/studio/adapters/media.py",
+            "symbol": "FFmpegMedia.render",
+            "line": 288
+          }
+        }
+      ],
+      "outputs": [
+        "Project中的歌词/样式",
+        "导出ASS或烧录后的视频"
+      ],
+      "caveats": [
+        "歌名、原唱和歌词仍需要人工/本地LRC输入。"
+      ],
+      "tests": [
+        "services/studio/tests/test_core.py"
+      ]
+    },
+    {
+      "id": "accounts",
+      "title": "多人权限与个人副本",
+      "status": "implemented",
+      "description": "共享素材与私人编辑元数据分开，复制项目不复制完整录播。",
+      "steps": [
+        {
+          "node": "be-access",
+          "title": "识别账户与角色",
+          "detail": "管理员、编辑者和浏览者由服务端配置。",
+          "source": {
+            "path": "services/studio/studio/access.py",
+            "symbol": "Access.identify",
+            "line": 43
+          }
+        },
+        {
+          "node": "be-api",
+          "title": "核对项目访问",
+          "detail": "所有项目、下载和修改检查角色/所有权；令牌绑定账户。",
+          "source": {
+            "path": "services/studio/studio/api.py",
+            "symbol": "_create_app.visible_project",
+            "line": 155
+          }
+        },
+        {
+          "node": "be-studio",
+          "title": "复用媒体资产",
+          "detail": "副本仍引用同一源文件和衍生预览。",
+          "source": {
+            "path": "services/studio/studio/service.py",
+            "symbol": "Studio.with_previews",
+            "line": 42
+          }
+        },
+        {
+          "node": "be-store",
+          "title": "保存独立草稿",
+          "detail": "各自Project ID/owner/revision。",
+          "source": {
+            "path": "services/studio/studio/store.py",
+            "symbol": "Store.create",
+            "line": 33
+          }
+        },
+        {
+          "node": "fe-project-flow",
+          "title": "只读或个人编辑",
+          "detail": "无写权限时先创建自己的剪辑副本。",
+          "source": {
+            "path": "apps/web/src/main.tsx",
+            "symbol": "cloneProject",
+            "line": 363
+          }
+        }
+      ],
+      "outputs": [
+        "共享原片 + 每人独立Project",
+        "账户配置不进入前端或Git"
+      ],
+      "caveats": [
+        "目前不是匿名开放注册或计费系统。",
+        "后端权限不能只靠按钮禁用。"
+      ],
+      "tests": [
+        "services/studio/tests/test_server_resources.py"
+      ]
+    },
+    {
+      "id": "cache",
+      "title": "缓存与资源保护",
+      "status": "implemented",
+      "description": "按可再生数据、任务状态和引用关系清理；同时限制请求和重计算。",
+      "steps": [
+        {
+          "node": "fe-cache",
+          "title": "查看 / 清理缓存",
+          "detail": "管理员查看分类大小及清理反馈。",
+          "source": {
+            "path": "apps/web/src/CacheSettings.tsx",
+            "symbol": "CacheSettings",
+            "line": 12
+          }
+        },
+        {
+          "node": "be-cache",
+          "title": "重新核对候选",
+          "detail": "保护当前引用、原片、模型、导出与活动任务。",
+          "source": {
+            "path": "services/studio/studio/cache.py",
+            "symbol": "RuntimeCache.clean",
+            "line": 135
+          }
+        },
+        {
+          "node": "be-resource-policy",
+          "title": "执行预算",
+          "detail": "队列、上传、磁盘、连接和带宽受限。",
+          "source": {
+            "path": "services/studio/studio/request_limits.py",
+            "symbol": "RequestLimits.__call__",
+            "line": 24
+          }
+        },
+        {
+          "node": "be-execution",
+          "title": "取消与期限",
+          "detail": "终止拥有的子进程树；工作目录锁阻止重复服务。",
+          "source": {
+            "path": "services/studio/studio/execution.py",
+            "symbol": "run_process",
+            "line": 76
+          }
+        }
+      ],
+      "outputs": [
+        "缓存容量报告与清理计数",
+        "共享预览/检测缓存、构建缓存分别管理"
+      ],
+      "caveats": [
+        "自动回收仅处理符合条件且过期的可再生缓存。",
+        "不按文件名全盘删除PyTorch或用户素材。"
+      ],
+      "tests": [
+        "services/studio/tests/test_cache.py",
+        "services/studio/tests/test_request_limits.py",
+        "services/studio/tests/test_execution.py"
+      ]
+    },
+    {
+      "id": "appearance",
+      "title": "皮肤与外观",
+      "status": "implemented",
+      "description": "设置由独立TS控制器持有，通过React薄桥接更新显示。",
+      "steps": [
+        {
+          "node": "fe-appearance",
+          "title": "选择外观",
+          "detail": "猫娘/简洁、配色、明暗模式。",
+          "source": {
+            "path": "apps/web/src/AppearanceSettings.tsx",
+            "symbol": "AppearanceSettings",
+            "line": 17
+          }
+        },
+        {
+          "node": "fe-theme",
+          "title": "管理偏好与订阅",
+          "detail": "校验存储值，监听系统明暗与标签页变化。",
+          "source": {
+            "path": "apps/web/src/theme.ts",
+            "symbol": "createAppearanceController",
+            "line": 55
+          }
+        },
+        {
+          "node": "fe-welcome",
+          "title": "展示角色与入口",
+          "detail": "装饰资产不覆盖视频或进入导出。",
+          "source": {
+            "path": "apps/web/src/SkinWelcome.tsx",
+            "symbol": "SkinWelcome",
+            "line": 11
+          }
+        }
+      ],
+      "outputs": [
+        "当前站点localStorage偏好",
+        "DOM语义色变量"
+      ],
+      "caveats": [
+        "当前控制器为工厂函数，未重构为AppearanceStore类。"
+      ],
+      "tests": [
+        "apps/web/tests/theme.test.mjs"
+      ]
+    },
+    {
+      "id": "future-11",
+      "title": "自动歌名与原唱识别",
+      "status": "interface",
+      "description": "仅定义输入输出协议，尚无提供方实现。",
+      "steps": [
+        {
+          "node": "future-capability-0",
+          "title": "能力协议",
+          "detail": "参考库/指纹匹配适配器、任务与结果确认流程。当前歌曲名称手动填写，detector只生成待识别片段。",
+          "source": {
+            "path": "services/studio/studio/ports.py",
+            "symbol": "SongIdentifier",
+            "line": 11
+          }
+        }
+      ],
+      "outputs": [
+        "尚无业务产物"
+      ],
+      "caveats": [
+        "参考库/指纹匹配适配器、任务与结果确认流程。当前歌曲名称手动填写，detector只生成待识别片段。"
+      ],
+      "tests": []
+    },
+    {
+      "id": "future-12",
+      "title": "歌词自动搜索与逐字对齐",
+      "status": "interface",
+      "description": "仅定义输入输出协议，尚无提供方实现。",
+      "steps": [
+        {
+          "node": "future-capability-1",
+          "title": "能力协议",
+          "detail": "歌词来源适配器和对齐引擎；目前只有LRC导入与已有时间戳的ASS输出。",
+          "source": {
+            "path": "services/studio/studio/ports.py",
+            "symbol": "LyricsProvider",
+            "line": 15
+          }
+        }
+      ],
+      "outputs": [
+        "尚无业务产物"
+      ],
+      "caveats": [
+        "歌词来源适配器和对齐引擎；目前只有LRC导入与已有时间戳的ASS输出。"
+      ],
+      "tests": []
+    },
+    {
+      "id": "future-13",
+      "title": "AI封面和AI标题",
+      "status": "interface",
+      "description": "仅定义输入输出协议，尚无提供方实现。",
+      "steps": [
+        {
+          "node": "future-capability-2",
+          "title": "能力协议",
+          "detail": "实际模型/服务适配器、用户选择与生成任务。",
+          "source": {
+            "path": "services/studio/studio/ports.py",
+            "symbol": "CoverGenerator",
+            "line": 27
+          }
+        }
+      ],
+      "outputs": [
+        "尚无业务产物"
+      ],
+      "caveats": [
+        "实际模型/服务适配器、用户选择与生成任务。"
+      ],
+      "tests": []
+    },
+    {
+      "id": "future-14",
+      "title": "自动上传B站或音乐播放器",
+      "status": "interface",
+      "description": "仅定义输入输出协议，尚无提供方实现。",
+      "steps": [
+        {
+          "node": "future-capability-3",
+          "title": "能力协议",
+          "detail": "发布实现、凭据与目标平台状态/重试。B站录制接入不能等同于B站上传。",
+          "source": {
+            "path": "services/studio/studio/ports.py",
+            "symbol": "Publisher",
+            "line": 35
+          }
+        }
+      ],
+      "outputs": [
+        "尚无业务产物"
+      ],
+      "caveats": [
+        "发布实现、凭据与目标平台状态/重试。B站录制接入不能等同于B站上传。"
+      ],
+      "tests": []
+    },
+    {
+      "id": "future-15",
+      "title": "分布式计算/远程Mac执行节点",
+      "status": "planned",
+      "description": "规划中的能力，当前没有远程任务协议或执行节点。",
+      "steps": [
+        {
+          "node": "future-capability-4",
+          "title": "当前约束",
+          "detail": "远程任务协议、节点租约和共享存储；当前强制每数据目录单API实例。",
+          "source": {
+            "path": "services/studio/studio/jobs.py",
+            "symbol": "JobRunner",
+            "line": 10
+          }
+        }
+      ],
+      "outputs": [
+        "尚无业务产物"
+      ],
+      "caveats": [
+        "远程任务协议、节点租约和共享存储；当前强制每数据目录单API实例。"
+      ],
+      "tests": []
+    }
+  ],
+  "plans": [
+    {
+      "id": "contract-drift",
+      "priority": "P0",
+      "title": "契约存在四份来源，已经漂移",
+      "problem": "Python领域类型、FastAPI动态响应、静态OpenAPI和手工TS类型并行维护。 源码AST统计45个HTTP操作，静态OpenAPI仅32个，缺13个；Project静态schema缺9个字段。",
+      "target": "先为运行响应补齐明确DTO（含权限与预览元数据），固定OpenAPI生成命令；再生成TS协议类型和客户端，CI比较生成结果防漂移。",
+      "classes": [
+        "ProjectDTO",
+        "JobDTO",
+        "CapabilitiesDTO",
+        "GeneratedApiClient"
+      ],
+      "preserve": [
+        "Python是持久化与最终校验的事实来源。",
+        "先补响应模型，再自动生成TS类型；不是盲目套用旧OpenAPI。"
+      ],
+      "sources": [
+        {
+          "path": "packages/contracts/openapi.json",
+          "symbol": "静态快照",
+          "line": 1
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "project_view",
+          "line": 167
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "协议类型",
+          "line": 1
+        }
+      ],
+      "acceptance": [
+        "当前45个路由操作均进入生成快照。",
+        "权限/预览/任务字段有明确响应类型。",
+        "CI检查生成文件漂移。"
+      ]
+    },
+    {
+      "id": "ts-draft",
+      "priority": "P1",
+      "title": "将App的草稿和用例编排拆开",
+      "problem": "App当前31个useState、6个useEffect、20个内部命名处理函数；不要只把1804行App搬进一个God class。",
+      "target": "ProjectDraft管理快照、dirty、片段变更；ProjectService管理加载/保存/克隆等用例；EditorSession暴露可订阅状态，React hook或Vue composable做很薄的适配。",
+      "classes": [
+        "ProjectDraft",
+        "ProjectService",
+        "EditorSession"
+      ],
+      "preserve": [
+        "组件仅接收快照并转发用户操作；服务类不导入React/Vue。",
+        "时间码、帧换算、校验继续调用现有纯函数。"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/main.tsx",
+          "line": 122,
+          "symbol": "当前实现"
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "line": 279,
+          "symbol": "当前实现"
+        },
+        {
+          "path": "apps/web/src/main.tsx",
+          "line": 613,
+          "symbol": "当前实现"
+        }
+      ],
+      "acceptance": [
+        "不渲染UI即可验证流程和失败恢复。",
+        "原有草稿、取消、权限与重试行为不回退。"
+      ]
+    },
+    {
+      "id": "ts-http",
+      "priority": "P1",
+      "title": "会话、HTTP和上传采用可注入服务类",
+      "problem": "这些对象有状态和生命周期，适合类；不是把36个接口简单套进一个更大的全能类。",
+      "target": "类封装会话single-flight、取消与连接生命周期；通过接口注入fetch/XHR工厂，StudioGateway保留业务端点方法。React/Vue组件只调用应用服务。",
+      "classes": [
+        "HttpClient",
+        "SessionManager",
+        "XhrUploader",
+        "StudioGateway"
+      ],
+      "preserve": [
+        "组件仅接收快照并转发用户操作；服务类不导入React/Vue。",
+        "时间码、帧换算、校验继续调用现有纯函数。"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/api.ts",
+          "line": 243,
+          "symbol": "当前实现"
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "line": 305,
+          "symbol": "当前实现"
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "line": 360,
+          "symbol": "当前实现"
+        }
+      ],
+      "acceptance": [
+        "不渲染UI即可验证流程和失败恢复。",
+        "原有草稿、取消、权限与重试行为不回退。"
+      ]
+    },
+    {
+      "id": "ts-preview",
+      "priority": "P1",
+      "title": "统一异步预览与任务生命周期",
+      "problem": "两套预览仍各自持有轮询、busy/error和版本处理；已有polling.ts可继续复用。",
+      "target": "抽出请求去重、任务状态、取消、过期响应、质量切换和播放位置恢复；通过MediaPlayerPort适配video DOM。切歌low/high与训练compatible是不同策略参数，不能强制合并成同一种预览。",
+      "classes": [
+        "PreviewCoordinator",
+        "JobMonitor"
+      ],
+      "preserve": [
+        "组件仅接收快照并转发用户操作；服务类不导入React/Vue。",
+        "时间码、帧换算、校验继续调用现有纯函数。"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/main.tsx",
+          "line": 332,
+          "symbol": "当前实现"
+        },
+        {
+          "path": "apps/web/src/TrainingAnnotation.tsx",
+          "line": 87,
+          "symbol": "当前实现"
+        },
+        {
+          "path": "apps/web/src/polling.ts",
+          "line": 2,
+          "symbol": "当前实现"
+        }
+      ],
+      "acceptance": [
+        "不渲染UI即可验证流程和失败恢复。",
+        "原有草稿、取消、权限与重试行为不回退。"
+      ]
+    },
+    {
+      "id": "ts-training",
+      "priority": "P1",
+      "title": "训练视图只显示，训练/标注会话进入TS",
+      "problem": "901行训练页与532行标注器混合UI、校验、请求及状态，框架迁移时难复用。",
+      "target": "状态、加载保存用例进Controller；区间增删/重叠判断进入AnnotationDraft或纯规则；准备度/参数校验保留纯函数；DOM坐标和键盘事件仍由视图适配。",
+      "classes": [
+        "TrainingController",
+        "AnnotationDraft"
+      ],
+      "preserve": [
+        "组件仅接收快照并转发用户操作；服务类不导入React/Vue。",
+        "时间码、帧换算、校验继续调用现有纯函数。"
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/TrainingWorkspace.tsx",
+          "line": 44,
+          "symbol": "当前实现"
+        },
+        {
+          "path": "apps/web/src/TrainingWorkspace.tsx",
+          "line": 88,
+          "symbol": "当前实现"
+        },
+        {
+          "path": "apps/web/src/TrainingAnnotation.tsx",
+          "line": 112,
+          "symbol": "当前实现"
+        }
+      ],
+      "acceptance": [
+        "不渲染UI即可验证流程和失败恢复。",
+        "原有草稿、取消、权限与重试行为不回退。"
+      ]
+    },
+    {
+      "id": "split-http-composition",
+      "priority": "P1",
+      "title": "将HTTP路由与服务组装拆开",
+      "problem": "api.py 646行；_create_app包含大量嵌套路由、权限整形和业务回调。录制模块已单独使用APIRouter，可作为拆分模板。",
+      "target": "保留一个composition root创建依赖，按项目、模型、训练、媒体、缓存分组路由；将make_project/clone等应用用例移入明确服务。",
+      "classes": [
+        "ProjectRouter",
+        "ModelRouter",
+        "TrainingRouter",
+        "CompositionRoot"
+      ],
+      "preserve": [
+        "保留已有Python资源类与明确生命周期。",
+        "不因拆文件改变原片、队列和权限边界。"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "_create_app",
+          "line": 101
+        },
+        {
+          "path": "services/studio/studio/recording_api.py",
+          "symbol": "recording_router",
+          "line": 23
+        }
+      ],
+      "acceptance": [
+        "模块不再跨层读取对方私有状态。",
+        "现有行为测试通过，再删除重复路径。"
+      ]
+    },
+    {
+      "id": "repositories",
+      "priority": "P1",
+      "title": "收敛数据库访问入口",
+      "problem": "Store包装项目和Job，但ModelLibrary、TrainingService、RecorderService、RuntimeCache仍直接执行SQL。",
+      "target": "按聚合提供ProjectRepository、JobRepository、TrainingRepository、RecordingRepository、ModelRepository；事务边界仍在Python，避免把权限或存储实现搬到UI。",
+      "classes": [
+        "ProjectRepository",
+        "TrainingRepository",
+        "RecordingRepository"
+      ],
+      "preserve": [
+        "保留已有Python资源类与明确生命周期。",
+        "不因拆文件改变原片、队列和权限边界。"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/store.py",
+          "symbol": "Store",
+          "line": 12
+        },
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "TrainingService",
+          "line": 111
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderService",
+          "line": 151
+        },
+        {
+          "path": "services/studio/studio/model_library.py",
+          "symbol": "ModelLibrary",
+          "line": 43
+        }
+      ],
+      "acceptance": [
+        "模块不再跨层读取对方私有状态。",
+        "现有行为测试通过，再删除重复路径。"
+      ]
+    },
+    {
+      "id": "typed-tasks",
+      "priority": "P1",
+      "title": "为持久任务定义带版本的类型",
+      "problem": "Job.task是dict，Studio注册字符串kind和处理器；训练样本/任务也大量使用dict。",
+      "target": "定义PreviewTask、DetectionTask、ExportTask等版本化描述，恢复前显式验证；分清媒体Job与TrainingJob，不把两套状态混为一个万能类。",
+      "classes": [
+        "PreviewTask",
+        "DetectionTask",
+        "ExportTask"
+      ],
+      "preserve": [
+        "保留已有Python资源类与明确生命周期。",
+        "不因拆文件改变原片、队列和权限边界。"
+      ],
+      "sources": [
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "Job",
+          "line": 130
+        },
+        {
+          "path": "services/studio/studio/service.py",
+          "symbol": "Studio",
+          "line": 30
+        },
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner.restore",
+          "line": 35
+        }
+      ],
+      "acceptance": [
+        "模块不再跨层读取对方私有状态。",
+        "现有行为测试通过，再删除重复路径。"
+      ]
+    },
+    {
+      "id": "runtime-config",
+      "priority": "P2",
+      "title": "统一版本与开发端口配置",
+      "problem": "应用0.1.0分散在根/Web/桌面包、Cargo、Tauri、Python及API健康响应；发行脚本只同步核对三个桌面版本。Docker torch2.5.1、发行torch2.8.0、Mac已测锁为另外一组版本。 Vite开发代理还固定指向8765。",
+      "target": "集中版本清单和平台依赖配置，生成各语言版本常量；明确CPU/MPS兼容矩阵和API协议版本，避免只看应用名称就复用不兼容后端。 代理目标从同一个服务地址配置读取，保留明确的本地默认值。",
+      "classes": [
+        "RuntimeConfig",
+        "ReleaseManifest"
+      ],
+      "preserve": [
+        "Web、桌面和服务器仍复用一套业务服务。",
+        "本地与服务器预算差异通过配置表达。"
+      ],
+      "sources": [
+        {
+          "path": ".github/workflows/release.yml",
+          "symbol": "版本检查",
+          "line": 60
+        },
+        {
+          "path": "Dockerfile",
+          "symbol": "CPU wheels",
+          "line": 39
+        },
+        {
+          "path": "requirements-macos-tested.lock",
+          "symbol": "已测平台锁",
+          "line": 1
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "health",
+          "line": 273
+        },
+        {
+          "path": "apps/desktop/src-tauri/src/main.rs",
+          "symbol": "is_studio_response",
+          "line": 26
+        },
+        {
+          "path": "apps/web/vite.config.ts",
+          "symbol": "proxy",
+          "line": 5
+        },
+        {
+          "path": "apps/desktop/src-tauri/src/main.rs",
+          "symbol": "select_service",
+          "line": 112
+        }
+      ],
+      "acceptance": [
+        "版本/端口只改一处即可生成各端配置。",
+        "源码、打包和容器路径分别验证。"
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "title": "当前不是“UI-only”结构",
+      "body": "main.tsx文件有1930行（其中App函数1804行），TrainingWorkspace.tsx文件有901行；状态、请求、重试和业务判断混在视图文件。当前前端只有ApiError一个显式类。抽类应围绕有状态用例，不能仅把函数包进static类。",
+      "sources": [
+        {
+          "path": "apps/web/src/main.tsx",
+          "line": 122,
+          "symbol": "App"
+        },
+        {
+          "path": "apps/web/src/TrainingWorkspace.tsx",
+          "line": 88,
+          "symbol": "TrainingWorkspace"
+        }
+      ]
+    },
+    {
+      "title": "两套任务机制需要明确区分",
+      "body": "媒体任务由JobRunner串行执行，训练由TrainingService自己的工作器执行。低配模式关闭训练；不能画成所有任务都自动经过同一个队列。",
+      "sources": [
+        {
+          "path": "services/studio/studio/jobs.py",
+          "symbol": "JobRunner",
+          "line": 10
+        },
+        {
+          "path": "services/studio/studio/training.py",
+          "symbol": "TrainingService",
+          "line": 111
+        }
+      ]
+    },
+    {
+      "title": "接口不等于已经实现的插件",
+      "body": "歌名识别、歌词检索/对齐、封面、标题和发布都仍是Protocol边界。B站录制接入已经实现，但B站自动投稿没有实现。",
+      "sources": [
+        {
+          "path": "services/studio/studio/ports.py",
+          "symbol": "SingingDetector",
+          "line": 7
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "RecorderClient",
+          "line": 64
+        }
+      ]
+    },
+    {
+      "title": "旧架构文档已经滞后",
+      "body": "原ARCHITECTURE.md仍将桌面壳列为规划、队列恢复列为未来工作；本次图谱按当前分支源码重新核对，并将旧说明同步修正。",
+      "sources": [
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "line": 1,
+          "symbol": "旧架构说明"
+        }
+      ]
+    }
+  ],
+  "runtimes": [
+    {
+      "id": "local",
+      "title": "本地源码",
+      "summary": "浏览器访问本机API；同一Python服务协调模型、训练和FFmpeg。默认保留训练入口。",
+      "steps": [
+        "构建React/Vite静态资源，再通过scripts/dev.py启动API。",
+        "浏览器只调用同源HTTP；开发Vite代理另有固定端口配置。",
+        "普通模式可选CPU/MPS/CUDA中的可用设备；重任务在独立进程执行。"
+      ],
+      "nodes": [
+        "delivery-source",
+        "fe-app",
+        "be-api",
+        "be-runtime",
+        "be-training",
+        "be-inference"
+      ],
+      "storage": [
+        {
+          "location": "var/ 或 SONGCUT_DATA",
+          "content": "用户项目、素材、模型和导出",
+          "owner": "本地用户；不会提交到Git"
+        },
+        {
+          "location": "localStorage",
+          "content": "当前站点的外观偏好",
+          "owner": "浏览器；换域名/端口各自隔离"
+        }
+      ],
+      "limits": [
+        "本地正常模式保留模型训练。",
+        "实际使用8777时，Vite开发代理当前仍需调整。",
+        "运行数据与代码目录分开。"
+      ]
+    },
+    {
+      "id": "server",
+      "title": "Linux 低配服务器",
+      "summary": "独立录播器负责保存直播，拾歌负责入库、共享预览和受控计算；Caddy可提供域名入口。",
+      "steps": [
+        "deploy.sh --recorder启动Compose并自动设置录播回调。",
+        "BililiveRecorder保存原始流，FileClosed通知拾歌。",
+        "应用把完成文件登记为共享项目；按队列生成320p。",
+        "浏览器使用私人草稿编辑，按配额排队检测和导出。"
+      ],
+      "nodes": [
+        "delivery-entry",
+        "delivery-server",
+        "external-recorder",
+        "be-recorder",
+        "be-jobs",
+        "be-access",
+        "be-resource-policy"
+      ],
+      "storage": [
+        {
+          "location": "recorder-data → /recordings:ro",
+          "content": "完整原始录播",
+          "owner": "录播姬写入；拾歌只读引用"
+        },
+        {
+          "location": "songcut-data → /data",
+          "content": "SQLite、模型、共享衍生文件、个人任务产物",
+          "owner": "拾歌服务"
+        },
+        {
+          "location": "server-accounts.json / 服务端环境",
+          "content": "账户、角色及私有配置",
+          "owner": "管理员；前端不接收密码"
+        },
+        {
+          "location": "/data/previews / detections",
+          "content": "可复用预览与检测缓存",
+          "owner": "应用；引用/任务状态决定清理资格"
+        }
+      ],
+      "limits": [
+        "默认一个重计算执行位；每账户与总队列有上限。",
+        "低配模式关闭训练，CPU分块推理。",
+        "上传/媒体连接/带宽与磁盘余量受控。",
+        "当前为受控FileResponse+Caddy反代，没有HLS/CDN/对象存储。"
+      ]
+    },
+    {
+      "id": "desktop",
+      "title": "Tauri 桌面应用",
+      "summary": "Rust壳负责WebView与内置后端生命周期，复用同一网页和Python业务代码。",
+      "steps": [
+        "Tauri寻找或启动可信的本机拾歌后端。",
+        "默认端口被其他程序占用时选择可用回环端口。",
+        "校验自己的进程、端口就绪信号和健康身份后打开WebView。",
+        "退出只清理自己启动的后端；打包模式从资源目录定位工具和worker。"
+      ],
+      "nodes": [
+        "delivery-desktop",
+        "delivery-frozen",
+        "be-runtime",
+        "fe-app",
+        "be-api"
+      ],
+      "storage": [
+        {
+          "location": "系统应用数据目录",
+          "content": "项目、模型、录播与导出",
+          "owner": "当前系统用户"
+        },
+        {
+          "location": "安装包 backend/_internal/resources",
+          "content": "Python/ML、FFmpeg、字体与静态UI",
+          "owner": "发行构建；不是可以随意删除的临时缓存"
+        }
+      ],
+      "limits": [
+        "桌面宿主不重新实现剪辑/训练业务。",
+        "当前源码改动不自动等于已发布安装包更新。",
+        "各系统签名、依赖和安装验收是独立交付工作。"
+      ]
+    }
+  ],
+  "overview": [
+    [
+      "fe-app",
+      "fe-project-flow",
+      "fe-training",
+      "fe-recordings"
+    ],
+    [
+      "fe-api",
+      "be-api",
+      "be-recorder-api",
+      "be-access"
+    ],
+    [
+      "be-studio",
+      "be-jobs",
+      "be-training",
+      "be-domain"
+    ],
+    [
+      "be-media",
+      "be-inference",
+      "be-store",
+      "be-recorder"
+    ]
+  ],
+  "contract": {
+    "snapshotPaths": 29,
+    "snapshotOperations": 32,
+    "sourcePaths": 41,
+    "sourceOperations": 45,
+    "missingOperations": [
+      "GET /api/cache",
+      "GET /api/recorder/rooms",
+      "GET /api/recorder/status",
+      "GET /api/recordings",
+      "GET /help/recording",
+      "PATCH /api/recorder/rooms/{room_id}",
+      "POST /api/cache/clean",
+      "POST /api/jobs/{job_id}/cancel",
+      "POST /api/projects/{ident}/clone",
+      "POST /api/recorder/rooms",
+      "POST /api/recorder/rooms/{room_id}/{action}",
+      "POST /api/recorder/webhook",
+      "POST /api/recordings/{ident}/retry"
+    ],
+    "missingProjectFields": [
+      "high_preview_file",
+      "owner",
+      "preview_profile",
+      "recording",
+      "shared",
+      "source_browser_compatible",
+      "source_height",
+      "source_project_id",
+      "source_width"
+    ]
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "line": 273,
+      "symbol": "_create_app.health",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/session",
+      "line": 277,
+      "symbol": "_create_app.session",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capabilities",
+      "line": 282,
+      "symbol": "_create_app.capabilities",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cache",
+      "line": 290,
+      "symbol": "_create_app.cache_status",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/cache/clean",
+      "line": 294,
+      "symbol": "_create_app.clean_cache",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "line": 298,
+      "symbol": "_create_app.projects",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/upload",
+      "line": 302,
+      "symbol": "_create_app.upload",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{ident}",
+      "line": 325,
+      "symbol": "_create_app.project",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{ident}/clone",
+      "line": 329,
+      "symbol": "_create_app.clone_project",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/{ident}",
+      "line": 339,
+      "symbol": "_create_app.save",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{ident}/detect",
+      "line": 351,
+      "symbol": "_create_app.detect",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{ident}/preview",
+      "line": 365,
+      "symbol": "_create_app.preview",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{ident}/clips/{clip_id}/export",
+      "line": 371,
+      "symbol": "_create_app.export",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{ident}/clips/{clip_id}/lyrics",
+      "line": 377,
+      "symbol": "_create_app.lyrics",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{ident}/media",
+      "line": 382,
+      "symbol": "_create_app.source_media",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs",
+      "line": 401,
+      "symbol": "_create_app.jobs",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/{job_id}/cancel",
+      "line": 439,
+      "symbol": "_create_app.cancel_job",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/artifacts/{job_id}/{filename}",
+      "line": 446,
+      "symbol": "_create_app.artifact",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/models",
+      "line": 458,
+      "symbol": "_create_app.models",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/models/upload",
+      "line": 469,
+      "symbol": "_create_app.import_model",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/models/{model_id}/download",
+      "line": 490,
+      "symbol": "_create_app.download_model",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/training/datasets",
+      "line": 500,
+      "symbol": "_create_app.datasets",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/training/datasets",
+      "line": 504,
+      "symbol": "_create_app.create_dataset",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/training/datasets/{dataset_id}",
+      "line": 508,
+      "symbol": "_create_app.dataset",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/training/datasets/{dataset_id}/samples",
+      "line": 512,
+      "symbol": "_create_app.add_sample",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/training/datasets/{dataset_id}/samples/{sample_id}",
+      "line": 532,
+      "symbol": "_create_app.update_sample",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/training/datasets/{dataset_id}/samples/{sample_id}",
+      "line": 536,
+      "symbol": "_create_app.remove_sample",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/training/datasets/{dataset_id}/samples/{sample_id}/media",
+      "line": 540,
+      "symbol": "_create_app.training_media",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/training/datasets/{dataset_id}/samples/{sample_id}/preview",
+      "line": 548,
+      "symbol": "_create_app.training_preview",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/training/datasets/{dataset_id}/train",
+      "line": 578,
+      "symbol": "_create_app.start_training",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/training/jobs",
+      "line": 589,
+      "symbol": "_create_app.training_jobs",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/training/jobs/{job_id}",
+      "line": 593,
+      "symbol": "_create_app.training_job",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/training/jobs/{job_id}/cancel",
+      "line": 597,
+      "symbol": "_create_app.cancel_training",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/help/faq.md",
+      "line": 601,
+      "symbol": "_create_app.faq_markdown",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/help/faq",
+      "line": 619,
+      "symbol": "_create_app.faq",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/help/recording",
+      "line": 623,
+      "symbol": "_create_app.recording_help",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/help/models",
+      "line": 627,
+      "symbol": "_create_app.model_help",
+      "file": "services/studio/studio/api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/recorder/status",
+      "line": 32,
+      "symbol": "recording_router.status",
+      "file": "services/studio/studio/recording_api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/recorder/rooms",
+      "line": 35,
+      "symbol": "recording_router.rooms",
+      "file": "services/studio/studio/recording_api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/recorder/rooms",
+      "line": 38,
+      "symbol": "recording_router.add",
+      "file": "services/studio/studio/recording_api.py"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/recorder/rooms/{room_id}",
+      "line": 44,
+      "symbol": "recording_router.configure",
+      "file": "services/studio/studio/recording_api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/recorder/rooms/{room_id}/{action}",
+      "line": 51,
+      "symbol": "recording_router.action",
+      "file": "services/studio/studio/recording_api.py"
+    },
+    {
+      "method": "GET",
+      "path": "/api/recordings",
+      "line": 58,
+      "symbol": "recording_router.recordings",
+      "file": "services/studio/studio/recording_api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/recordings/{ident}/retry",
+      "line": 61,
+      "symbol": "recording_router.retry",
+      "file": "services/studio/studio/recording_api.py"
+    },
+    {
+      "method": "POST",
+      "path": "/api/recorder/webhook",
+      "line": 64,
+      "symbol": "recording_router.webhook",
+      "file": "services/studio/studio/recording_api.py"
+    }
+  ]
+}

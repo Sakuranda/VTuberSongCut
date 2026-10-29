@@ -117,7 +117,7 @@ git clone https://github.com/Sakuranda/VTuberSongCut.git && cd VTuberSongCut
 - [模型使用说明](docs/MODELS.md) — 模型来源、格式及 AutoSlicer 使用方法
 - [服务器部署](docs/DEPLOYMENT.md) — Docker、域名与数据持久化
 - [发行维护](docs/RELEASING.md) — 自动构建与发布流程
-- [架构设计](docs/ARCHITECTURE.md) · [路线图](docs/ROADMAP.md)
+- [架构设计](docs/ARCHITECTURE.md) · [交互代码地图](docs/architecture/README.md) · [路线图](docs/ROADMAP.md)
 
 ## Contributing
 

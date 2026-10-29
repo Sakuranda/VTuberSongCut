@@ -1,0 +1,865 @@
+{
+  "audit_date": "2026-10-29",
+  "source_commit": "333104dab5cc25c6c59a6ae2f79a49f11a6160f1",
+  "nodes": [
+    {
+      "id": "delivery-source",
+      "title": "源码运行入口",
+      "kind": "runtime",
+      "layer": "交付与运行",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "scripts/dev.py",
+          "symbol": "脚本入口",
+          "line": 6
+        },
+        {
+          "path": "services/studio/studio/runtime.py",
+          "symbol": "resource_root / data_root / worker_command",
+          "line": 13
+        },
+        {
+          "path": "apps/web/vite.config.ts",
+          "symbol": "开发代理",
+          "line": 3
+        }
+      ],
+      "responsibility": "把已经构建的网页交给本机Python API；开发预览可通过Vite转发接口。",
+      "features": [
+        "源码模式由 scripts/dev.py 启动 studio.api",
+        "资源在仓库内，默认用户数据在 var/；SONGCUT_DATA可覆盖",
+        "CPU/MPS等设备选择由后端负责，UI只请求接口"
+      ],
+      "dependencies": [
+        "apps/web/dist",
+        "services/studio/studio/api.py",
+        "services/studio/studio/config.py"
+      ],
+      "notes": [
+        "Vite开发代理目前固定8765，实际本地8777需显式调整开发代理；生产构建由API同源提供，不走Vite代理。"
+      ]
+    },
+    {
+      "id": "delivery-desktop",
+      "title": "Tauri 桌面宿主",
+      "kind": "runtime",
+      "layer": "交付与运行",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "apps/desktop/src-tauri/src/main.rs",
+          "symbol": "Backend",
+          "line": 102
+        },
+        {
+          "path": "apps/desktop/src-tauri/src/main.rs",
+          "symbol": "select_service",
+          "line": 113
+        },
+        {
+          "path": "apps/desktop/src-tauri/src/main.rs",
+          "symbol": "Backend::wait_ready",
+          "line": 266
+        },
+        {
+          "path": "apps/desktop/src-tauri/src/main.rs",
+          "symbol": "main / WebviewWindowBuilder",
+          "line": 319
+        }
+      ],
+      "responsibility": "管理本机后端进程与窗口；桌面和浏览器复用同一套网页与HTTP业务。",
+      "features": [
+        "首选8765，只复用带VTuberSongCut身份的服务",
+        "冲突时改用空闲回环端口，核对就绪文件PID和端口",
+        "关闭窗口只停止自己启动的后端，不停止复用的其他实例"
+      ],
+      "dependencies": [
+        "services/studio/studio/launcher.py",
+        "apps/desktop/src-tauri/tauri.release.conf.json",
+        "apps/web/dist"
+      ],
+      "notes": [
+        "Rust不承担剪辑、模型或媒体算法；WebView打开后端地址。",
+        "当前健康握手检查应用身份，未来协议升级可补充API/资源版本兼容检查。"
+      ]
+    },
+    {
+      "id": "delivery-frozen",
+      "title": "独立后端与 worker 打包",
+      "kind": "build",
+      "layer": "交付与运行",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "scripts/build_desktop_backend.py",
+          "symbol": "main / 资源收集",
+          "line": 28
+        },
+        {
+          "path": "scripts/build_desktop_backend.py",
+          "symbol": "PyInstaller命令",
+          "line": 127
+        },
+        {
+          "path": "services/studio/studio/launcher.py",
+          "symbol": "main worker dispatcher",
+          "line": 25
+        },
+        {
+          "path": "services/studio/studio/runtime.py",
+          "symbol": "worker_command",
+          "line": 49
+        }
+      ],
+      "responsibility": "将Python服务、模型运行库、FFmpeg、字体和上游算法包装为桌面可执行运行环境。",
+      "features": [
+        "PyInstaller onedir 后端随Tauri资源一起分发",
+        "统一分派probe / prepare / train / infer / infer-stream子进程",
+        "权重不随桌面包附送，用户导入已有兼容模型",
+        "成功打包后清理可再生中间文件，打包产物保留"
+      ],
+      "dependencies": [
+        "services/studio/studio/model_probe.py",
+        "services/studio/studio/training_worker.py",
+        "services/studio/studio/inference_worker.py",
+        "scripts/clean.py",
+        "packages/contracts/model-source.json"
+      ],
+      "notes": [
+        "打包运行数据按macOS/Windows/Linux各自用户数据目录保存，不写安装目录。"
+      ]
+    },
+    {
+      "id": "delivery-server",
+      "title": "Linux CPU 容器",
+      "kind": "runtime",
+      "layer": "交付与运行",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "Dockerfile",
+          "symbol": "web / engine / server三阶段镜像",
+          "line": 2
+        },
+        {
+          "path": "Dockerfile",
+          "symbol": "CPU runtime与非root用户",
+          "line": 27
+        },
+        {
+          "path": "compose.yaml",
+          "symbol": "songcut服务与资源预算",
+          "line": 3
+        }
+      ],
+      "responsibility": "构建网页和固定上游算法，在CPU版Python运行环境中提供同源API和网页。",
+      "features": [
+        "CPU版PyTorch/torchaudio，无需NVIDIA驱动",
+        "默认低配模式，关闭服务器训练",
+        "/data持久化项目、模型与导出",
+        "CPU/内存/PID、队列、上传、媒体带宽参数由Compose传入"
+      ],
+      "dependencies": [
+        "services/studio/studio/api.py",
+        "services/studio/studio/resources.py",
+        "services/studio/studio/request_limits.py",
+        "packages/contracts/model-source.json",
+        "patches/0001-apple-silicon.patch"
+      ],
+      "notes": [
+        "当前镜像声明CPU依赖与资源预算，不代表已在所有Linux配置完成容量压测。"
+      ]
+    },
+    {
+      "id": "delivery-recorder",
+      "title": "独立录播姬服务",
+      "kind": "external",
+      "layer": "交付与运行",
+      "status": "external",
+      "files": [
+        {
+          "path": "deploy/compose.recorder.yaml",
+          "symbol": "recorder service",
+          "line": 16
+        },
+        {
+          "path": "scripts/deploy.sh",
+          "symbol": "--recorder与回调初始化",
+          "line": 47
+        },
+        {
+          "path": "services/studio/studio/recorder.py",
+          "symbol": "main --configure-webhook",
+          "line": 350
+        }
+      ],
+      "responsibility": "第三方录播姬负责从B站保存原始码流；拾歌只接完成事件和管理接口。",
+      "features": [
+        "固定BililiveRecorder 2.20.0镜像",
+        "录播卷在录制器读写、在拾歌只读挂载",
+        "管理端口只在Docker内网暴露",
+        "部署脚本自动设置Webhook V2，再由拾歌录播库添加房间"
+      ],
+      "dependencies": [
+        "services/studio/studio/recording_api.py",
+        "services/studio/studio/recorder.py"
+      ],
+      "notes": [
+        "录制代码不在本仓库，是独立GPL-3.0组件。",
+        "主播画质和Cookie由录播姬处理；本仓库集成测试使用模拟通知和真实合成媒体。"
+      ]
+    },
+    {
+      "id": "delivery-entry",
+      "title": "部署编排与域名入口",
+      "kind": "deploy",
+      "layer": "交付与运行",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "scripts/deploy.sh",
+          "symbol": "Compose参数拼装与凭据保留",
+          "line": 67
+        },
+        {
+          "path": "deploy/compose.domain.yaml",
+          "symbol": "Caddy service",
+          "line": 3
+        },
+        {
+          "path": "deploy/Caddyfile",
+          "symbol": "reverse_proxy",
+          "line": 1
+        },
+        {
+          "path": "deploy/compose.accounts.yaml",
+          "symbol": "独立账户环境配置",
+          "line": 3
+        }
+      ],
+      "responsibility": "一条脚本组合服务、域名TLS、录播与独立账户配置。",
+      "features": [
+        "生成并保留.env.server凭据",
+        "可选Caddy域名入口，API端口默认只绑定主机回环地址",
+        "server-accounts.json保持0600，通过服务端环境传给非root容器",
+        "仅完成回调配置成功后报告录制入口准备完成"
+      ],
+      "dependencies": [
+        "compose.yaml",
+        "deploy/compose.recorder.yaml",
+        "services/studio/studio/access.py",
+        "services/studio/studio/server_config.py"
+      ],
+      "notes": [
+        "当前媒体仍经Caddy反代和应用受控文件流；没有独立CDN、对象存储或HLS服务。"
+      ]
+    },
+    {
+      "id": "delivery-upstream",
+      "title": "算法来源与兼容补丁",
+      "kind": "contract",
+      "layer": "交付与运行",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "packages/contracts/model-source.json",
+          "symbol": "固定上游提交与权重校验",
+          "line": 2
+        },
+        {
+          "path": "scripts/setup_model.py",
+          "symbol": "读取manifest并安装补丁",
+          "line": 14
+        },
+        {
+          "path": "patches/0001-apple-silicon.patch",
+          "symbol": "Apple兼容补丁",
+          "line": 1
+        }
+      ],
+      "responsibility": "保证桌面、源码和容器从同一审阅基准取得AutoSlicer，并保留上游代码边界。",
+      "features": [
+        "固定AutoSlicer-v2基础提交",
+        "应用Apple Silicon兼容补丁",
+        "可选下载官方阿梓检查点并校验SHA-256",
+        "已有上游目录和不同模型不会被静默覆盖"
+      ],
+      "dependencies": [
+        "upstream/AutoSlicer-v2",
+        "services/studio/studio/model_library.py",
+        "services/studio/studio/adapters/autoslicer.py"
+      ],
+      "notes": [
+        "upstream/是被Git忽略的第三方克隆，不属于业务源码。",
+        "官方模型scope明确为主播演唱检测，不是歌名识别或声音转换。"
+      ]
+    },
+    {
+      "id": "delivery-release",
+      "title": "跨平台构建与发行",
+      "kind": "build",
+      "layer": "交付与运行",
+      "status": "implemented",
+      "files": [
+        {
+          "path": ".github/workflows/release.yml",
+          "symbol": "validate / platform matrix",
+          "line": 30
+        },
+        {
+          "path": ".github/workflows/release.yml",
+          "symbol": "媒体缓存与构建",
+          "line": 109
+        },
+        {
+          "path": ".github/workflows/release.yml",
+          "symbol": "freeze与安装器测试",
+          "line": 173
+        },
+        {
+          "path": ".github/workflows/release.yml",
+          "symbol": "publish",
+          "line": 300
+        },
+        {
+          "path": "scripts/build_release_media.py",
+          "symbol": "main",
+          "line": 28
+        },
+        {
+          "path": "packaging/vcpkg.json",
+          "symbol": "受控FFmpeg功能",
+          "line": 4
+        }
+      ],
+      "responsibility": "把可运行源码转成各平台独立安装包，并一起保存对应媒体源码、许可与校验信息。",
+      "features": [
+        "macOS Apple Silicon DMG、Windows x64 NSIS、Linux x64 AppImage/deb",
+        "固定vcpkg基准与FFmpeg功能，复用经过校验的媒体/源码缓存",
+        "PyInstaller后端 → Tauri安装器 → 各系统安装验收 → 校验和 → prerelease",
+        "手动构建可只留产物；部分平台诊断不能发布完整release"
+      ],
+      "dependencies": [
+        "scripts/build_desktop_backend.py",
+        "scripts/export_media_sources.py",
+        "scripts/verify_release_artifacts.py",
+        "scripts/smoke_desktop_backend.py",
+        "scripts/smoke_macos_installer.py",
+        "scripts/smoke_windows_installer.ps1",
+        "scripts/smoke_linux_installers.py"
+      ],
+      "notes": [
+        "这条重型构建路径才包含FFmpeg源码编译；日常网页编辑和Python开发不必经过它。",
+        "源码分支功能存在不等于相同功能已进入已发布安装包。"
+      ]
+    },
+    {
+      "id": "delivery-quality",
+      "title": "测试与交付门禁",
+      "kind": "quality",
+      "layer": "交付与运行",
+      "status": "implemented",
+      "files": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "symbol": "backend / web jobs",
+          "line": 3
+        },
+        {
+          "path": ".github/workflows/server.yml",
+          "symbol": "真实容器验收",
+          "line": 11
+        },
+        {
+          "path": "scripts/smoke_desktop_backend.py",
+          "symbol": "main",
+          "line": 18
+        },
+        {
+          "path": "services/studio/tests/test_recorder_flow.py",
+          "symbol": "真实媒体录制入库流程测试",
+          "line": 18
+        },
+        {
+          "path": "apps/web/tests/playback.test.mjs",
+          "symbol": "预览与草稿行为测试",
+          "line": 1
+        }
+      ],
+      "responsibility": "分别验证核心行为、网页构建、真实媒体/子进程以及安装与容器边界。",
+      "features": [
+        "核心CI在三种操作系统跑Python测试，网页CI运行TypeScript构建和Node测试",
+        "Docker工作流测试认证、CPU运行时、上传、Range和持久化",
+        "发行工作流检查独立后端训练/推理、媒体工具和真实安装器内容",
+        "隔离测试覆盖权限、取消、恢复、低清、录制事件与缓存"
+      ],
+      "dependencies": [
+        "services/studio/tests",
+        "apps/web/tests",
+        ".github/workflows/release.yml"
+      ],
+      "notes": [
+        "此审计只读源码，没有重新执行测试。",
+        "2026-10-28验收文档记录246后端测试通过、1可选跳过，前端49通过；实际运行数量与平台/可选依赖有关。"
+      ]
+    },
+    {
+      "id": "delivery-contracts",
+      "title": "API契约与类型镜像",
+      "kind": "contract",
+      "layer": "交付与运行",
+      "status": "implemented",
+      "files": [
+        {
+          "path": "packages/contracts/openapi.json",
+          "symbol": "静态API快照",
+          "line": 1
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "HTTP路由与动态响应",
+          "line": 195
+        },
+        {
+          "path": "services/studio/studio/domain.py",
+          "symbol": "Pydantic领域记录",
+          "line": 1
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "手工TypeScript接口与HTTP访问",
+          "line": 1
+        }
+      ],
+      "responsibility": "目前由Python模型、FastAPI路由、静态OpenAPI文件和TS接口共同描述协议，但尚未形成自动同步的单一来源。",
+      "features": [
+        "后端Pydantic校验请求和领域对象",
+        "前端TypeScript描述工程、任务、训练和录制响应",
+        "静态OpenAPI作为参考文档存在"
+      ],
+      "dependencies": [
+        "services/studio/studio/recording_api.py",
+        "services/studio/studio/ports.py"
+      ],
+      "notes": [
+        "静态快照32个操作，当前源码45个操作；缺13个新增操作。",
+        "Project静态schema缺9个新字段；can_edit/can_clone为动态响应字段。",
+        "部分新路由没有显式response_model，直接重生成OpenAPI不足以恢复完整TS类型。"
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "source-runtime",
+      "title": "本地源码运行",
+      "status": "implemented",
+      "steps": [
+        "npm run web:build 生成静态UI",
+        "scripts/dev.py 启动 studio.api",
+        "浏览器访问回环地址",
+        "共享Python服务读取var/并调用独立worker"
+      ],
+      "files": [
+        {
+          "path": "scripts/dev.py",
+          "symbol": "入口",
+          "line": 6
+        },
+        {
+          "path": "services/studio/studio/runtime.py",
+          "symbol": "data_root",
+          "line": 21
+        }
+      ]
+    },
+    {
+      "id": "desktop-runtime",
+      "title": "桌面运行",
+      "status": "implemented",
+      "steps": [
+        "Tauri选择本机端口",
+        "复用已验证服务或启动内置songcut-backend",
+        "launcher分派服务/worker并发出就绪信号",
+        "WebView打开服务同源UI",
+        "窗口退出只关闭自身后端"
+      ],
+      "files": [
+        {
+          "path": "apps/desktop/src-tauri/src/main.rs",
+          "symbol": "main",
+          "line": 319
+        },
+        {
+          "path": "services/studio/studio/launcher.py",
+          "symbol": "main",
+          "line": 25
+        }
+      ]
+    },
+    {
+      "id": "server-runtime",
+      "title": "服务器与录播",
+      "status": "implemented",
+      "steps": [
+        "deploy.sh拼装Compose和私有账户",
+        "Caddy提供可选域名入口",
+        "CPU版songcut容器提供UI/API及受限队列",
+        "独立BililiveRecorder写录播卷",
+        "FileClosed回调导入共享项目并排队生成预览"
+      ],
+      "files": [
+        {
+          "path": "scripts/deploy.sh",
+          "symbol": "Compose",
+          "line": 67
+        },
+        {
+          "path": "deploy/compose.recorder.yaml",
+          "symbol": "shared volume",
+          "line": 14
+        }
+      ]
+    },
+    {
+      "id": "release-build",
+      "title": "源码到安装包",
+      "status": "implemented",
+      "steps": [
+        "核对版本与平台矩阵",
+        "复用或构建受控FFmpeg+匹配源码",
+        "构建网页、准备固定AutoSlicer",
+        "PyInstaller冻结Python/ML/媒体运行环境",
+        "Tauri构建平台安装器",
+        "独立运行与安装检查",
+        "所有平台通过后发布预发行版"
+      ],
+      "files": [
+        {
+          "path": ".github/workflows/release.yml",
+          "symbol": "build",
+          "line": 70
+        },
+        {
+          "path": ".github/workflows/release.yml",
+          "symbol": "publish",
+          "line": 300
+        }
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "contract-drift",
+      "priority": "P0",
+      "title": "契约存在四份来源，已经漂移",
+      "current": "Python领域类型、FastAPI动态响应、静态OpenAPI和手工TS类型并行维护。",
+      "evidence": "源码AST统计45个HTTP操作，静态OpenAPI仅32个，缺13个；Project静态schema缺9个字段。",
+      "proposal": "先为运行响应补齐明确DTO（含权限与预览元数据），固定OpenAPI生成命令；再生成TS协议类型和客户端，CI比较生成结果防漂移。",
+      "status": "planned",
+      "files": [
+        {
+          "path": "packages/contracts/openapi.json",
+          "symbol": "静态快照",
+          "line": 1
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "project_view",
+          "line": 167
+        },
+        {
+          "path": "apps/web/src/api.ts",
+          "symbol": "协议类型",
+          "line": 1
+        }
+      ]
+    },
+    {
+      "id": "ui-split",
+      "priority": "P0",
+      "title": "从大视图中抽离有状态用例",
+      "current": "main.tsx 1930行、TrainingWorkspace.tsx 901行；视图和请求调度、草稿、冲突/重试混合。",
+      "proposal": "建立框架无关的ProjectSession、PreviewCoordinator、TaskTracker、TrainingSession类，通过构造注入API/时钟/事件端口；React或未来Vue只绑定状态和派发动作。时间换算、边界规则、校验保留纯函数，不为类而类。",
+      "status": "planned",
+      "files": [
+        {
+          "path": "apps/web/src/main.tsx",
+          "symbol": "App",
+          "line": 122
+        },
+        {
+          "path": "apps/web/src/TrainingWorkspace.tsx",
+          "symbol": "TrainingWorkspace",
+          "line": 88
+        }
+      ]
+    },
+    {
+      "id": "router-split",
+      "priority": "P1",
+      "title": "把组合入口与HTTP模块分开",
+      "current": "api.py 646行，同时装配服务、定义请求模型、鉴权和多数路由。",
+      "proposal": "保留create_app为Composition Root，拆project/model/training/media/cache路由，向应用服务注入已构造依赖；recording_api.py已可作初步示例。",
+      "status": "planned",
+      "files": [
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "create_app",
+          "line": 80
+        },
+        {
+          "path": "services/studio/studio/recording_api.py",
+          "symbol": "recording_router",
+          "line": 23
+        }
+      ]
+    },
+    {
+      "id": "version-source",
+      "priority": "P1",
+      "title": "版本与运行配置要形成统一发布清单",
+      "current": "应用0.1.0分散在根/Web/桌面包、Cargo、Tauri、Python及API健康响应；发行脚本只同步核对三个桌面版本。Docker torch2.5.1、发行torch2.8.0、Mac已测锁为另外一组版本。",
+      "proposal": "集中版本清单和平台依赖配置，生成各语言版本常量；明确CPU/MPS兼容矩阵和API协议版本，避免只看应用名称就复用不兼容后端。",
+      "status": "planned",
+      "files": [
+        {
+          "path": ".github/workflows/release.yml",
+          "symbol": "版本检查",
+          "line": 60
+        },
+        {
+          "path": "Dockerfile",
+          "symbol": "CPU wheels",
+          "line": 39
+        },
+        {
+          "path": "requirements-macos-tested.lock",
+          "symbol": "已测平台锁",
+          "line": 1
+        },
+        {
+          "path": "services/studio/studio/api.py",
+          "symbol": "health",
+          "line": 273
+        },
+        {
+          "path": "apps/desktop/src-tauri/src/main.rs",
+          "symbol": "is_studio_response",
+          "line": 27
+        }
+      ]
+    },
+    {
+      "id": "dev-port",
+      "priority": "P1",
+      "title": "开发代理没有跟随可变端口",
+      "current": "用户本地使用8777，Vite仍硬编码把/api转到8765；桌面端口又可自动回退。",
+      "proposal": "让开发API地址从单一环境配置注入，并在启动脚本输出实际地址；生产继续同源，无需在业务TS类里写端口。",
+      "status": "planned",
+      "files": [
+        {
+          "path": "apps/web/vite.config.ts",
+          "symbol": "proxy",
+          "line": 5
+        },
+        {
+          "path": "apps/desktop/src-tauri/src/main.rs",
+          "symbol": "select_service",
+          "line": 113
+        }
+      ]
+    },
+    {
+      "id": "verification-scope",
+      "priority": "P1",
+      "title": "区分代码存在、集成通过与生产验证",
+      "current": "录制/低配代码和本机测试已存在，最新验收明确没有真实B站长录制或目标Linux容量压测；源分支也不等于已发安装包。",
+      "proposal": "架构页为每项能力分别显示实现状态和验证边界；增加目标主机基准、长录制断流/磁盘场景及发布版本映射。",
+      "status": "planned",
+      "files": [
+        {
+          "path": "docs/RECORDING-ACCEPTANCE-2026-10-28.md",
+          "symbol": "验证边界",
+          "line": 1
+        },
+        {
+          "path": ".github/workflows/server.yml",
+          "symbol": "docker-smoke",
+          "line": 11
+        }
+      ]
+    }
+  ],
+  "contract_audit": {
+    "saved_paths": 29,
+    "saved_operations": 32,
+    "source_paths": 41,
+    "source_operations": 45,
+    "missing_operation_count": 13,
+    "missing_project_fields": [
+      "high_preview_file",
+      "owner",
+      "preview_profile",
+      "recording",
+      "shared",
+      "source_browser_compatible",
+      "source_height",
+      "source_project_id",
+      "source_width"
+    ],
+    "method": "只读AST路由装饰器与静态JSON比较；没有启动服务或生成运行schema；45为全部HTTP操作（含4个帮助端点），其中/api路径41个操作。",
+    "source_api_operations": 41,
+    "source_api_paths": 37,
+    "saved_api_operations": 29,
+    "saved_api_paths": 26,
+    "missing_operations": [
+      "GET /api/cache",
+      "GET /api/recorder/rooms",
+      "GET /api/recorder/status",
+      "GET /api/recordings",
+      "GET /help/recording",
+      "PATCH /api/recorder/rooms/{room_id}",
+      "POST /api/cache/clean",
+      "POST /api/jobs/{job_id}/cancel",
+      "POST /api/projects/{ident}/clone",
+      "POST /api/recorder/rooms",
+      "POST /api/recorder/rooms/{room_id}/{action}",
+      "POST /api/recorder/webhook",
+      "POST /api/recordings/{ident}/retry"
+    ]
+  },
+  "runtimes": [
+    {
+      "id": "local",
+      "title": "本地源码",
+      "entry": "scripts/dev.py",
+      "ui": "浏览器 + 已构建React UI",
+      "compute": "Python API + 独立CPU/MPS等worker",
+      "data": "默认var/，SONGCUT_DATA可覆盖",
+      "training": "正常本地模式可训练"
+    },
+    {
+      "id": "server",
+      "title": "Linux低配",
+      "entry": "scripts/deploy.sh / Dockerfile",
+      "ui": "同一React UI，经可选Caddy域名入口",
+      "compute": "CPU版PyTorch + 单重任务队列；录播器独立",
+      "data": "/data与只读/recordings",
+      "training": "默认关闭，导入本地训练模型"
+    },
+    {
+      "id": "desktop",
+      "title": "Tauri安装包",
+      "entry": "apps/desktop/src-tauri/src/main.rs",
+      "ui": "WebView加载同一Python服务网页",
+      "compute": "PyInstaller内置后端与worker",
+      "data": "各OS用户数据目录",
+      "training": "取决于运行环境/模式；资源不写入安装目录"
+    }
+  ],
+  "directory_boundaries": [
+    {
+      "path": "apps/web/src",
+      "purpose": "当前React视图 + TS交互与HTTP逻辑；建议进一步拆层",
+      "status": "implemented"
+    },
+    {
+      "path": "services/studio/studio",
+      "purpose": "Python领域、应用服务、媒体/模型适配、存储与资源政策",
+      "status": "implemented"
+    },
+    {
+      "path": "apps/desktop",
+      "purpose": "Rust宿主、窗口与后端进程生命周期",
+      "status": "implemented"
+    },
+    {
+      "path": "packages/contracts",
+      "purpose": "API静态快照与模型来源清单；两者维护成熟度不同",
+      "status": "implemented"
+    },
+    {
+      "path": "scripts + packaging",
+      "purpose": "开发启动、媒体构建、运行环境打包、验收、发布与清理",
+      "status": "implemented"
+    },
+    {
+      "path": "deploy + .github/workflows",
+      "purpose": "服务器编排与CI/发行门禁",
+      "status": "implemented"
+    },
+    {
+      "path": "upstream/",
+      "purpose": "忽略的第三方克隆；固定版本+Apple补丁",
+      "status": "external"
+    },
+    {
+      "path": "var/",
+      "purpose": "忽略的持久项目、媒体、模型及用户产物，不是源码",
+      "status": "implemented"
+    },
+    {
+      "path": "work/",
+      "purpose": "忽略的构建和隔离验收中间文件，不是业务数据来源",
+      "status": "implemented"
+    }
+  ],
+  "future_boundaries": [
+    {
+      "title": "歌名/原唱识别",
+      "status": "interfaceonly",
+      "evidence": {
+        "path": "services/studio/studio/ports.py",
+        "symbol": "SongIdentifier",
+        "line": 11
+      }
+    },
+    {
+      "title": "歌词检索/强制对齐",
+      "status": "interfaceonly",
+      "evidence": {
+        "path": "services/studio/studio/ports.py",
+        "symbol": "LyricsProvider / LyricsAligner",
+        "line": 15
+      }
+    },
+    {
+      "title": "AI封面/标题",
+      "status": "interfaceonly",
+      "evidence": {
+        "path": "services/studio/studio/ports.py",
+        "symbol": "CoverGenerator / TitleGenerator",
+        "line": 27
+      }
+    },
+    {
+      "title": "B站投稿/音乐站上传",
+      "status": "interfaceonly",
+      "evidence": {
+        "path": "services/studio/studio/ports.py",
+        "symbol": "Publisher",
+        "line": 35
+      }
+    },
+    {
+      "title": "CDN/对象存储/HLS分发",
+      "status": "planned",
+      "evidence": {
+        "path": "deploy/Caddyfile",
+        "symbol": "当前只有反向代理",
+        "line": 1
+      }
+    }
+  ],
+  "static_metrics": {
+    "web_source_ts_tsx_files": 20,
+    "web_source_ts_tsx_lines": 5987,
+    "backend_py_files": 29,
+    "backend_py_lines": 4071,
+    "backend_test_py_files": 22,
+    "web_test_mjs_files": 7,
+    "script_source_files": 15,
+    "note": "静态代码计数，不是运行测试数；不含锁文件、样式、资源与忽略目录"
+  }
+}
